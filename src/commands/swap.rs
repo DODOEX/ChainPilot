@@ -167,7 +167,7 @@ async fn quote(
 
 async fn simulate(
     args: SimulateArgs,
-    _config: &AppConfig,
+    config: &AppConfig,
     store: &QuoteStore,
     onchain: &OnChainClient,
     output_mode: OutputMode,
@@ -193,6 +193,9 @@ async fn simulate(
             output_mode,
         ));
     }
+
+    let chain_onchain = OnChainClient::for_chain(config, quote_data.chain_id).await?;
+    let onchain = &chain_onchain;
 
     let mut warnings = Vec::new();
     let mut is_valid = true;

@@ -11,7 +11,8 @@ permissions:
   contents: write
 
 env:
-  BIN_NAME: chain
+  BIN_NAME: chainpilot
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   prepare-release:
@@ -50,16 +51,6 @@ jobs:
 
           echo "should_release=true" >> "$GITHUB_OUTPUT"
 
-      - name: Create and push tag
-        if: steps.detect.outputs.should_release == 'true'
-        env:
-          TAG: ${{ steps.detect.outputs.tag }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
-
   build:
     name: Build ${{ matrix.asset_name }}
     needs: prepare-release
@@ -71,29 +62,29 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            asset_name: chain-linux-x86_64
+            asset_name: chainpilot-linux-x86_64
             archive_ext: tar.gz
-            binary_name: chain
-          - os: ubuntu-24.04-arm
+            binary_name: chainpilot
+          - os: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
-            asset_name: chain-linux-aarch64
+            asset_name: chainpilot-linux-aarch64
             archive_ext: tar.gz
-            binary_name: chain
-          - os: macos-13
+            binary_name: chainpilot
+          - os: macos-14
             target: x86_64-apple-darwin
-            asset_name: chain-macos-x86_64
+            asset_name: chainpilot-macos-x86_64
             archive_ext: tar.gz
-            binary_name: chain
+            binary_name: chainpilot
           - os: macos-14
             target: aarch64-apple-darwin
-            asset_name: chain-macos-aarch64
+            asset_name: chainpilot-macos-aarch64
             archive_ext: tar.gz
-            binary_name: chain
+            binary_name: chainpilot
           - os: windows-2022
             target: x86_64-pc-windows-msvc
-            asset_name: chain-windows-x86_64
+            asset_name: chainpilot-windows-x86_64
             archive_ext: zip
-            binary_name: chain.exe
+            binary_name: chainpilot.exe
 
     steps:
       - name: Checkout
@@ -106,7 +97,15 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install cross-compilation tools (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build release binary
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package Unix artifact
@@ -139,6 +138,20 @@ jobs:
     if: needs.prepare-release.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create and push tag
+        env:
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
