@@ -1,0 +1,16 @@
+target
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+
+# Local runtime data for this CLI
+data/
+quotes/
+history/
+
+# Local editor/agent artifacts
+.claude/
+.codex

@@ -1,0 +1,312 @@
+use comfy_table::{Attribute, Cell, Table};
+
+pub trait TableRenderable {
+    fn render_table(&self);
+}
+
+impl TableRenderable for String {
+    fn render_table(&self) {
+        println!("{}", self);
+    }
+}
+
+impl TableRenderable for crate::chain::TxStatus {
+    fn render_table(&self) {
+        let mut table = comfy_table::Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Confirmed", &self.confirmed.to_string()]);
+        table.add_row(vec!["Success", &self.success.to_string()]);
+        if let Some(bn) = self.block_number {
+            table.add_row(vec!["Block", &bn.to_string()]);
+        }
+        if let Some(gas) = self.gas_used {
+            table.add_row(vec!["Gas Used", &gas.to_string()]);
+        }
+        if let Some(price) = self.effective_gas_price {
+            table.add_row(vec!["Eff. Gas Price (gwei)", &format!("{}", price)]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::quote::Quote {
+    fn render_table(&self) {
+        let estimated_gas = self
+            .estimated_gas
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "N/A".to_string());
+        let gas_limit = self
+            .gas_limit
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "N/A".to_string());
+        let min_received = format_token_amount(
+            &self.to_amount_min,
+            self.to_token.decimals,
+            &self.to_token.symbol,
+        );
+        let value_display = format_native_value(&self.value);
+
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Quote ID", &self.quote_id.to_string()]);
+        table.add_row(vec![
+            "From",
+            &format!("{} {}", self.from_amount_display, self.from_token.symbol),
+        ]);
+        table.add_row(vec![
+            "To",
+            &format!("{} {}", self.to_amount_display, self.to_token.symbol),
+        ]);
+        table.add_row(vec![
+            "Rate",
+            &format!(
+                "1 {} = {} {}",
+                self.from_token.symbol, self.exchange_rate, self.to_token.symbol
+            ),
+        ]);
+        table.add_row(vec!["Price Impact", &format!("{}%", self.price_impact_pct)]);
+        table.add_row(vec!["Min Received", &min_received]);
+        table.add_row(vec!["Router", &self.router_to]);
+        table.add_row(vec!["Value", &value_display]);
+        table.add_row(vec!["Est. Gas", &estimated_gas]);
+        table.add_row(vec!["Gas Limit", &gas_limit]);
+        table.add_row(vec![
+            "Expires",
+            &self.expires_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        ]);
+        if !self.route_summary.is_empty() {
+            let hops: Vec<String> = self
+                .route_summary
+                .iter()
+                .map(|h| format!("{} -> {} ({})", h.from_token, h.to_token, h.dex_name))
+                .collect();
+            table.add_row(vec!["Route", &hops.join("\n")]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::swap::SimulationResult {
+    fn render_table(&self) {
+        let estimated_gas = self
+            .estimated_gas
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "N/A".to_string());
+
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Valid", &self.is_valid.to_string()]);
+        table.add_row(vec!["Expected Out", &self.expected_out]);
+        table.add_row(vec!["Min Out", &self.min_out]);
+        table.add_row(vec!["Gas Estimate", &estimated_gas]);
+        table.add_row(vec![
+            "Gas Price (gwei)",
+            &format!("{}", self.gas_price_gwei),
+        ]);
+        table.add_row(vec![
+            "Gas Cost (ETH)",
+            &format!("{}", self.total_gas_cost_eth),
+        ]);
+        for warning in &self.warnings {
+            table.add_row(vec!["Warning", warning]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::swap::ExecutionResult {
+    fn render_table(&self) {
+        let value_display = format_native_value(&self.value_eth);
+
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Status", &format!("{:?}", self.status)]);
+        table.add_row(vec!["Dry Run", &self.dry_run.to_string()]);
+        if let Some(ref tx) = self.tx_hash {
+            table.add_row(vec!["TX Hash", tx]);
+        }
+        table.add_row(vec!["To Contract", &self.to_contract]);
+        table.add_row(vec!["Value", &value_display]);
+        if let Some(ref from) = self.from_address {
+            table.add_row(vec!["From", from]);
+        }
+        if let Some(gas) = self.gas_used {
+            table.add_row(vec!["Gas Used", &format!("{}", gas)]);
+        }
+        if let Some(price) = self.effective_gas_price_gwei {
+            table.add_row(vec!["Eff. Gas Price (gwei)", &format!("{}", price)]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::swap::ApprovalResult {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Token", &self.token]);
+        table.add_row(vec!["Spender", &self.spender]);
+        table.add_row(vec!["Amount", &self.raw_amount]);
+        table.add_row(vec!["Dry Run", &self.dry_run.to_string()]);
+        if let Some(ref tx) = self.tx_hash {
+            table.add_row(vec!["TX Hash", tx]);
+        }
+        if let Some(ref from) = self.from_address {
+            table.add_row(vec!["From", from]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::token::TokenContract {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Address", &self.address]);
+        table.add_row(vec!["Is Proxy", &self.is_proxy.to_string()]);
+        if let Some(ref impl_addr) = self.proxy_implementation {
+            table.add_row(vec!["Implementation", impl_addr]);
+        }
+        if let Some(ref owner) = self.owner {
+            table.add_row(vec!["Owner", owner]);
+        }
+        if let Some(ref deployer) = self.deployer {
+            table.add_row(vec!["Deployer", deployer]);
+        }
+        if let Some(block) = self.deployed_at_block {
+            table.add_row(vec!["Deployed At Block", &block.to_string()]);
+        }
+        if let Some(verified) = self.is_verified {
+            table.add_row(vec!["Verified", &verified.to_string()]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::token::TokenInfo {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Address", &self.address]);
+        table.add_row(vec!["Symbol", &self.symbol]);
+        table.add_row(vec!["Name", &self.name]);
+        table.add_row(vec!["Decimals", &self.decimals.to_string()]);
+        table.add_row(vec![
+            "Total Supply",
+            &format!("{} ({})", self.total_supply_display, self.total_supply),
+        ]);
+        table.add_row(vec!["Source", &self.source]);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::wallet::WalletBalance {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Address", &self.address]);
+        table.add_row(vec![
+            "ETH Balance",
+            &format!("{} ({})", self.eth_balance_display, self.eth_balance),
+        ]);
+        for tb in &self.token_balances {
+            table.add_row(vec![
+                &format!("{} Balance", tb.symbol),
+                &format!("{} ({})", tb.balance_display, tb.balance),
+            ]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::risk::RiskReport {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Signal", "Severity", "Value"]);
+        for sig in &self.signals {
+            table.add_row(vec![
+                &sig.signal,
+                &format!("{:?}", sig.severity),
+                &sig.value.to_string(),
+            ]);
+        }
+        table.add_row(vec!["OVERALL", &format!("{:?}", self.overall_risk), ""]);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::risk::ApprovalRisk {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Token", &self.token_symbol]);
+        table.add_row(vec!["Spender", &self.spender]);
+        table.add_row(vec!["Current Allowance", &self.current_allowance]);
+        table.add_row(vec!["Is Unlimited", &self.is_unlimited.to_string()]);
+        table.add_row(vec!["Risk", &format!("{:?}", self.risk)]);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for Vec<crate::models::swap::SwapHistoryRecord> {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Time", "From", "To", "Amount", "Status", "TX"]);
+        for record in self {
+            table.add_row(vec![
+                &record.created_at.to_rfc3339(),
+                &record.from_token,
+                &record.to_token,
+                &format!(
+                    "{} -> {}",
+                    record.from_amount_display, record.to_amount_display
+                ),
+                &format!("{:?}", record.status),
+                record.tx_hash.as_deref().unwrap_or("N/A"),
+            ]);
+        }
+        println!("{}", table);
+    }
+}
+
+fn format_token_amount(raw: &str, decimals: u8, symbol: &str) -> String {
+    match raw_to_decimal_string(raw, decimals) {
+        Some(display) => format!("{} {} ({})", display, symbol, raw),
+        None => format!("{} {}", raw, symbol),
+    }
+}
+
+fn format_native_value(raw_wei: &str) -> String {
+    match raw_to_decimal_string(raw_wei, 18) {
+        Some(display) => format!("{} ETH ({} wei)", display, raw_wei),
+        None => raw_wei.to_string(),
+    }
+}
+
+fn raw_to_decimal_string(raw: &str, decimals: u8) -> Option<String> {
+    let digits = raw.strip_prefix('+').unwrap_or(raw);
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+
+    let decimals = decimals as usize;
+    if decimals == 0 {
+        return Some(digits.to_string());
+    }
+
+    let padded = if digits.len() <= decimals {
+        format!("{:0>width$}", digits, width = decimals + 1)
+    } else {
+        digits.to_string()
+    };
+
+    let split = padded.len() - decimals;
+    let int_part = &padded[..split];
+    let frac_part = padded[split..].trim_end_matches('0');
+
+    if frac_part.is_empty() {
+        Some(int_part.to_string())
+    } else {
+        Some(format!("{}.{}", int_part, frac_part))
+    }
+}
