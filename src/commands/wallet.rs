@@ -137,3 +137,20 @@ fn parse_token_amount(raw: &str, decimals: u8) -> f64 {
     let divisor = 10u128.pow(decimals as u32) as f64;
     raw_uint as f64 / divisor
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_token_amount;
+
+    #[test]
+    fn parse_token_amount_cases_are_table_driven() {
+        for (raw, decimals, expected) in [
+            ("0", 18, 0.0),
+            ("1234567", 6, 1.234567),
+            ("42", 0, 42.0),
+            ("not-a-number", 18, 0.0),
+        ] {
+            assert_eq!(parse_token_amount(raw, decimals), expected);
+        }
+    }
+}
