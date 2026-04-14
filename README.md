@@ -18,7 +18,7 @@ A command-line tool for on-chain DeFi operations on EVM-compatible networks. Bui
 
 **Linux / macOS (recommended):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DODOEX/ChainPilot/main/chainpilotup/install | bash
+curl -fsSL https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/install.sh | bash 2>&1
 ```
 
 This downloads the latest pre-built binary for your platform into `~/.chainpilot/bin` and adds it to your `PATH`.

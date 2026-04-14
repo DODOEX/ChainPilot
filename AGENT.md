@@ -2,11 +2,11 @@
 
 ## Skills
 
-The `skills/` directory in the project root contains Claude Code skills for this project. Each subdirectory is a skill that can be loaded via `/user:skill-name` (e.g. `/user:chainpilot`).
+The `skills/` directory in the project root contains skills for this project. Each subdirectory is a skill with a `SKILL.md` describing its usage (e.g. `skills/chainpilot/SKILL.md`).
 
 Currently available skills:
 - `skills/chainpilot/` — ChainPilot CLI usage and DeFi operation patterns
-- `skills/cast-wallet/` — cast wallet key management patterns
+- `skills/evm-wallet/` — EVM wallet management and contract interaction via Foundry cast
 
 ## Non-Obvious Conventions
 

@@ -1,25 +1,18 @@
 ---
-name: cast-wallet
+name: evm-wallet
 description: >
-  Manage Ethereum/EVM wallets and interact with smart contracts using the
-  Foundry `cast` CLI — covering wallet creation, vanity addresses, keystore
-  import, message signing, ETH transfers, contract calls (cast call / cast send),
-  gas estimation, and on-chain queries. Use this skill whenever the user asks
-  about wallets, private keys, signing, ERC-20 operations, or sending any
-  transaction from the command line.
+  Manage EVM wallets and interact with smart contracts using the Foundry `cast`
+  CLI — covering wallet creation, vanity addresses, keystore management, message
+  signing, ETH transfers, contract calls, gas estimation, and on-chain queries.
+  Use this skill whenever someone mentions wallets, private keys, signing,
+  ERC-20 operations, sending transactions, checking balances, Foundry, or cast.
+  Also use it when calling or deploying any EVM contract from the command line,
+  or managing token approvals.
 ---
 
-# cast wallet — Web3 Wallet & Contract Interaction
+# evm-wallet — EVM Wallet & Contract Interaction
 
-`cast` is Foundry's CLI tool covering wallet management, contract interaction, and on-chain queries.
-
-## Installation
-
-```bash
-curl -L https://foundry.paradigm.xyz | bash
-foundryup
-cast --version   # verify
-```
+`cast` is Foundry's CLI tool for wallet management, contract interaction, and on-chain queries.
 
 ---
 
@@ -39,6 +32,14 @@ cast --version   # verify
 | `cast send` | Send a state-changing transaction on-chain |
 | `cast estimate` | Estimate the gas cost of a transaction |
 | `cast receipt` | Fetch a transaction receipt by hash |
+
+### Installation
+
+```bash
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+cast --version   # verify
+```
 
 ---
 
@@ -300,17 +301,3 @@ cast call 0xTOKEN "name()(string)"
 - **Use separate keys per network.** Keep a throwaway key for testnets; never reuse mainnet keys for development.
 - **Verify the derived address** with `cast wallet address` before sending funds to a newly created key.
 
----
-
-## Integration with this project (chainpilot)
-
-chainpilot currently reads the signer from `PRIVATE_KEY` in `.env` (plaintext). To migrate to a keystore:
-
-```bash
-# 1. Import the key
-cast wallet import chainpilot-key --private-key $PRIVATE_KEY
-
-# 2. Remove PRIVATE_KEY from .env
-
-# 3. Pass --account chainpilot-key to any cast send call
-```

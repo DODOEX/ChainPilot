@@ -18,7 +18,7 @@
 
 **Linux / macOS（推荐）：**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DODOEX/ChainPilot/main/chainpilotup/install | bash
+curl -fsSL https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/install.sh | bash 2>&1
 ```
 
 脚本会自动下载适配当前平台的预编译二进制文件，安装到 `~/.chainpilot/bin` 并配置 `PATH`。
