@@ -23,6 +23,13 @@ curl -fsSL https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/inst
 
 脚本会自动下载适配当前平台的预编译二进制文件，安装到 `~/.chainpilot/bin` 并配置 `PATH`。
 
+**Windows（PowerShell）：**
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/install.ps1 -UseBasicParsing | iex"
+```
+
+脚本会自动下载 Windows 预编译二进制文件，安装到 `%USERPROFILE%\.chainpilot\bin` 并配置用户级 `PATH`。
+
 **从源码构建：**
 ```bash
 cargo build --release

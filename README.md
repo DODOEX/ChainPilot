@@ -23,6 +23,13 @@ curl -fsSL https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/inst
 
 This downloads the latest pre-built binary for your platform into `~/.chainpilot/bin` and adds it to your `PATH`.
 
+**Windows (PowerShell):**
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/install.ps1 -UseBasicParsing | iex"
+```
+
+This downloads the latest Windows release into `%USERPROFILE%\.chainpilot\bin` and adds it to your user `PATH`.
+
 **Build from source:**
 ```bash
 cargo build --release
