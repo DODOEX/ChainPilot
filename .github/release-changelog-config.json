@@ -1,0 +1,42 @@
+{
+  "template": "#{{CHANGELOG}}\n\n#{{UNCATEGORIZED}}",
+  "categories": [
+    {
+      "title": "## Features",
+      "labels": ["feat"]
+    },
+    {
+      "title": "## Fixes",
+      "labels": ["fix"]
+    },
+    {
+      "title": "## Performance",
+      "labels": ["perf"]
+    },
+    {
+      "title": "## Refactors",
+      "labels": ["refactor"]
+    },
+    {
+      "title": "## Documentation",
+      "labels": ["docs"]
+    },
+    {
+      "title": "## Tests",
+      "labels": ["test"]
+    },
+    {
+      "title": "## Maintenance",
+      "labels": ["build", "chore", "ci", "revert", "style"]
+    }
+  ],
+  "label_extractor": [
+    {
+      "pattern": "^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\\([\\w\\-.]+\\))?(!)?: .*$",
+      "target": "$1",
+      "on_property": "title"
+    }
+  ],
+  "commit_template": "- #{{TITLE}}",
+  "empty_template": "No user-facing changes in this release."
+}

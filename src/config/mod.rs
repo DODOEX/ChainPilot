@@ -25,7 +25,7 @@ pub const DEFAULT_DODO_PROJECT_ID: &str = match option_env!("DODO_PROJECT_ID") {
 };
 
 pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
-pub const DEFAULT_QUOTE_TTL_SECS: u64 = 300;
+pub const DEFAULT_QUOTE_TTL_SECS: u64 = 1080;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {

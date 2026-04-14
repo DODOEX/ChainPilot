@@ -22,6 +22,7 @@ jobs:
       should_release: ${{ steps.detect.outputs.should_release }}
       version: ${{ steps.detect.outputs.version }}
       tag: ${{ steps.detect.outputs.tag }}
+      previous_tag: ${{ steps.detect.outputs.previous_tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,6 +43,8 @@ jobs:
           tag="v$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          previous_tag=$(git tag --sort=-version:refname | head -n1 || true)
+          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
 
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             echo "Tag $tag already exists"
@@ -158,10 +161,21 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Build release notes
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v5
+        with:
+          configuration: .github/release-changelog-config.json
+          mode: COMMIT
+          toTag: ${{ needs.prepare-release.outputs.tag }}
+          fromTag: ${{ needs.prepare-release.outputs.previous_tag }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish GitHub release assets
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare-release.outputs.tag }}
           name: ${{ needs.prepare-release.outputs.tag }}
-          generate_release_notes: true
+          body: ${{ steps.changelog.outputs.changelog }}
           files: dist/*
