@@ -225,18 +225,24 @@ impl DodoClient {
 
         // Try fetching from API (skip if no project_id configured).
         if !self.project_id.is_empty() {
-            let by_chain = self.fetch_tokenlist_by_chain().await?;
-            let result = by_chain
-                .get(&chain_id.to_string())
-                .and_then(|tokens| tokens.iter().find(|t| t.symbol.to_uppercase() == upper))
-                .map(|t| TokenRef {
-                    symbol: t.symbol.clone(),
-                    address: t.address.clone(),
-                    decimals: t.decimals,
-                    chain_id,
-                });
-            save_cache(cache_path, by_chain);
-            return Ok(result);
+            match self.fetch_tokenlist_by_chain().await {
+                Ok(by_chain) => {
+                    let result = by_chain
+                        .get(&chain_id.to_string())
+                        .and_then(|tokens| tokens.iter().find(|t| t.symbol.to_uppercase() == upper))
+                        .map(|t| TokenRef {
+                            symbol: t.symbol.clone(),
+                            address: t.address.clone(),
+                            decimals: t.decimals,
+                            chain_id,
+                        });
+                    save_cache(cache_path, by_chain);
+                    return Ok(result);
+                }
+                Err(e) => {
+                    eprintln!("Warning: tokenlist API unavailable ({}), falling back to cache", e);
+                }
+            }
         }
 
         // API unavailable → fall back to stale cache.
@@ -252,14 +258,31 @@ impl DodoClient {
             .query(&[("project", &self.project_id), ("apikey", &self.api_key)])
             .send()
             .await
-            .map_err(|e| ChainError::DodoApi {
-                code: 0,
-                message: e.to_string(),
+            .map_err(|e| {
+                let reason = if e.is_timeout() {
+                    "timed out".to_string()
+                } else if e.is_connect() {
+                    format!("connection refused or unreachable: {}", e.without_url())
+                } else {
+                    e.without_url().to_string()
+                };
+                ChainError::DodoApi {
+                    code: 0,
+                    message: format!("tokenlist fetch failed: {}", reason),
+                }
             })?;
 
-        let val: serde_json::Value = resp.json().await.map_err(|e| ChainError::DodoApi {
+        let text = resp.text().await.map_err(|e| ChainError::DodoApi {
             code: 0,
-            message: e.to_string(),
+            message: format!("failed to read tokenlist response body: {}", e.without_url()),
+        })?;
+        let val: serde_json::Value = serde_json::from_str(&text).map_err(|e| ChainError::DodoApi {
+            code: 0,
+            message: format!(
+                "tokenlist response is not valid JSON ({}): {}",
+                e,
+                text.chars().take(120).collect::<String>()
+            ),
         })?;
 
         // Response may be wrapped: { data: { chains: [...] } } or { chains: [...] }
