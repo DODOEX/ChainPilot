@@ -38,9 +38,9 @@ All settings can be supplied as environment variables, a `.env` file, or CLI fla
 
 | Variable              | CLI flag            | Default                        | Description                            |
 |-----------------------|---------------------|--------------------------------|----------------------------------------|
-| `PRIVATE_KEY`         | `--wallet`          | —                              | Private key for signing transactions   |
+| `PRIVATE_KEY`         | `--private-key`     | —                              | Private key for signing transactions   |
 | `ETH_RPC_URL`         | `--rpc-url`         | Chain's built-in public RPC    | JSON-RPC endpoint                      |
-| `CHAIN_ID`            | —                   | `1` (Ethereum mainnet)         | Active chainpilot                           |
+| `CHAIN_ID`            | `--chain-id`        | `1` (Ethereum mainnet)         | Active chain ID                         |
 | `DODO_API_KEY`        | `--dodo-api-key`    | Compiled-in default            | DODO routing API key                   |
 | `DODO_PROJECT_ID`     | `--dodo-project-id` | Compiled-in default            | DODO project ID for token list lookup  |
 | `DODO_API_URL`        | —                   | DODO production endpoint       | Override routing API URL               |
@@ -76,7 +76,7 @@ RUST_LOG=debug chainpilot ...
 | Plume              | 98866    |
 | Sepolia Testnet    | 11155111 |
 
-For unsupported chainpilot IDs, set `ETH_RPC_URL` manually.
+For unsupported chain IDs, set `ETH_RPC_URL` manually.
 
 ## Usage
 

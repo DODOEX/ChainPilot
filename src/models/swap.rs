@@ -105,7 +105,7 @@ impl SwapHistoryRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::quote::{Quote, RouteHop, TokenRef};
+    use crate::models::quote::{Quote, TokenRef};
     use chrono::TimeZone;
 
     #[test]

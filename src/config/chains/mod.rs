@@ -21,6 +21,7 @@ pub const NATIVE_ADDR: &str = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 
 pub struct NativeToken {
     pub symbol: &'static str,
+    #[allow(dead_code)]
     pub name: &'static str,
     pub decimals: u8,
     pub wrapped_symbol: &'static str,

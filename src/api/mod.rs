@@ -4,7 +4,7 @@ pub use dodo::DodoClient;
 
 use crate::config::AppConfig;
 use crate::error::Result;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, USER_AGENT};
 
 pub struct ApiClients {
     pub dodo: DodoClient,

@@ -1,4 +1,4 @@
-use comfy_table::{Attribute, Cell, Table};
+use comfy_table::Table;
 
 pub trait TableRenderable {
     fn render_table(&self);

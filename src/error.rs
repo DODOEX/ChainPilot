@@ -25,6 +25,9 @@ pub enum ChainError {
     #[error("Invalid private key: {0}")]
     InvalidPrivateKey(String),
 
+    #[error("Invalid amount: {0}")]
+    InvalidAmount(String),
+
     #[error("Insufficient balance: have {have}, need {need} {token}")]
     InsufficientBalance {
         have: String,
@@ -32,7 +35,7 @@ pub enum ChainError {
         token: String,
     },
 
-    #[error("Token not approved. Run: chain swap approve --token {token} --spender {spender}")]
+    #[error("Token not approved. Run: chainpilot swap approve --token {token} --spender {spender}")]
     NotApproved { token: String, spender: String },
 
     #[error("Quote not found: {0}. Quotes expire after 5 minutes.")]
@@ -50,7 +53,7 @@ pub enum ChainError {
     #[error("Token not found: {0}")]
     TokenNotFound(String),
 
-    #[error("Unsupported chain ID: {0}. Run `chain token chains` to list supported chains.")]
+    #[error("Unsupported chain ID: {0}. See README for the supported chain list.")]
     UnsupportedChain(u64),
 
     #[error("Config error: {0}")]
@@ -119,7 +122,7 @@ mod tests {
         let msg = e.to_string();
         assert!(msg.contains("0xToken"));
         assert!(msg.contains("0xSpender"));
-        assert!(msg.contains("chain swap approve"));
+        assert!(msg.contains("chainpilot swap approve"));
     }
 
     #[test]
@@ -134,5 +137,11 @@ mod tests {
     fn token_not_found_includes_symbol() {
         let e = ChainError::TokenNotFound("PEPE".to_string());
         assert_eq!(e.to_string(), "Token not found: PEPE");
+    }
+
+    #[test]
+    fn invalid_amount_message() {
+        let e = ChainError::InvalidAmount("too many decimal places".to_string());
+        assert_eq!(e.to_string(), "Invalid amount: too many decimal places");
     }
 }

@@ -1,7 +1,7 @@
 //! Ethereum RPC calls via alloy Provider.
 
 use alloy::network::TransactionBuilder;
-use alloy::primitives::{Address, Bytes, U256};
+use alloy::primitives::{Address, U256};
 use alloy::providers::Provider;
 use alloy::rpc::types::TransactionRequest;
 use url::Url;

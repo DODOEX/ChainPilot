@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use crate::api::ApiClients;
-use crate::cli::{Cli, Commands};
+use crate::cli::Commands;
 use crate::config::AppConfig;
 use crate::error::Result;
 use crate::output::OutputMode;
@@ -21,21 +21,15 @@ pub async fn dispatch(
     api_clients: ApiClients,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    let onchain = OnChainClient::new(&config).await?;
-
     match cmd {
-        Commands::Swap(cmd) => {
-            swap::handle(cmd, &config, &store, &api_clients, &onchain, output_mode).await
-        }
+        Commands::Swap(cmd) => swap::handle(cmd, &config, &store, &api_clients, output_mode).await,
         Commands::Token(cmd) => {
-            token::handle(cmd, &config, &store, &api_clients, &onchain, output_mode).await
+            token::handle(cmd, &config, &store, &api_clients, output_mode).await
         }
         Commands::Wallet(cmd) => {
-            wallet::handle(cmd, &config, &store, &api_clients, &onchain, output_mode).await
+            wallet::handle(cmd, &config, &store, &api_clients, output_mode).await
         }
-        Commands::Risk(cmd) => {
-            risk::handle(cmd, &config, &store, &api_clients, &onchain, output_mode).await
-        }
+        Commands::Risk(cmd) => risk::handle(cmd, &config, &store, &api_clients, output_mode).await,
     }
 }
 
@@ -112,8 +106,75 @@ pub async fn resolve_token(
     Err(crate::error::ChainError::TokenNotFound(input.to_string()).into())
 }
 
-pub fn to_raw_amount(amount: f64, decimals: u8) -> String {
-    let multiplier = 10u128.pow(decimals as u32) as f64;
-    let raw = (amount * multiplier) as u128;
-    raw.to_string()
+pub fn parse_display_amount(amount: &str) -> Result<f64> {
+    amount
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| crate::error::ChainError::InvalidAmount(amount.to_string()))
+}
+
+pub fn to_raw_amount(amount: &str, decimals: u8) -> Result<String> {
+    let amount = amount.trim();
+    if amount.is_empty() {
+        return Err(crate::error::ChainError::InvalidAmount(
+            "amount cannot be empty".to_string(),
+        )
+        .into());
+    }
+    if amount.starts_with('-') {
+        return Err(crate::error::ChainError::InvalidAmount(
+            "amount cannot be negative".to_string(),
+        )
+        .into());
+    }
+
+    let mut parts = amount.split('.');
+    let int_part = parts.next().unwrap_or_default();
+    let frac_part = parts.next().unwrap_or_default();
+    if parts.next().is_some() {
+        return Err(crate::error::ChainError::InvalidAmount(amount.to_string()).into());
+    }
+    if !int_part.chars().all(|c| c.is_ascii_digit())
+        || !frac_part.chars().all(|c| c.is_ascii_digit())
+    {
+        return Err(crate::error::ChainError::InvalidAmount(amount.to_string()).into());
+    }
+    if frac_part.len() > decimals as usize {
+        return Err(crate::error::ChainError::InvalidAmount(format!(
+            "too many decimal places for token precision {}",
+            decimals
+        ))
+        .into());
+    }
+
+    let int_normalized = int_part.trim_start_matches('0');
+    let frac_padded = format!("{:0<width$}", frac_part, width = decimals as usize);
+    let combined = format!(
+        "{}{}",
+        if int_normalized.is_empty() { "0" } else { int_normalized },
+        frac_padded
+    );
+    let normalized = combined.trim_start_matches('0');
+    let raw = if normalized.is_empty() { "0" } else { normalized };
+    raw.parse::<u128>()
+        .map_err(|_| crate::error::ChainError::InvalidAmount(amount.to_string()))?;
+    Ok(raw.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_raw_amount_parses_decimal_strings_exactly() {
+        assert_eq!(to_raw_amount("1", 18).unwrap(), "1000000000000000000");
+        assert_eq!(to_raw_amount("0.25", 18).unwrap(), "250000000000000000");
+        assert_eq!(to_raw_amount("12.34", 6).unwrap(), "12340000");
+    }
+
+    #[test]
+    fn to_raw_amount_rejects_excess_precision() {
+        let err = to_raw_amount("0.1234567", 6).unwrap_err();
+        assert!(err.to_string().contains("too many decimal places"));
+    }
 }

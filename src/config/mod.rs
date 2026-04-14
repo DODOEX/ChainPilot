@@ -126,11 +126,6 @@ impl AppConfig {
         self.data_dir.join("tokenlist_cache.json")
     }
 
-    pub fn ensure_dirs(&self) -> std::io::Result<()> {
-        std::fs::create_dir_all(self.quotes_dir())?;
-        std::fs::create_dir_all(self.history_dir())?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]

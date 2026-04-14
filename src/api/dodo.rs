@@ -312,11 +312,9 @@ impl DodoClient {
     ) -> Result<Quote> {
         let deadline = (Utc::now() + Duration::from_secs(1200)).timestamp() as u64;
 
-        let multiplier = 10u128.pow(from_token.decimals as u32) as f64;
-        let amount_smallest_unit = (req.amount * multiplier) as u128;
-        let amount_str = amount_smallest_unit.to_string();
+        let amount_str = crate::commands::to_raw_amount(&req.amount, from_token.decimals)?;
 
-        let mut query = vec![
+        let query = vec![
             ("chainId", req.chain_id.to_string()),
             ("deadLine", deadline.to_string()),
             ("apikey", self.api_key.clone()),
@@ -381,14 +379,14 @@ impl DodoClient {
                 decimals: data.target_decimals.unwrap_or(to_token.decimals),
                 chain_id: req.chain_id,
             },
-            from_amount: req.amount.to_string(),
-            from_amount_display: req.amount,
+            from_amount: req.amount.clone(),
+            from_amount_display: req.amount_display,
             to_amount: data.res_amount.to_string(),
             to_amount_display: data.res_amount,
             to_amount_min: data.min_return_amount.clone(),
             price_impact_pct: data.price_impact,
-            exchange_rate: if req.amount > 0.0 {
-                data.res_amount / req.amount
+            exchange_rate: if req.amount_display > 0.0 {
+                data.res_amount / req.amount_display
             } else {
                 0.0
             },

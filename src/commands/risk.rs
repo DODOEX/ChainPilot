@@ -9,7 +9,7 @@ use crate::commands::resolve_token;
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
 use crate::models::risk::{ApprovalRisk, RiskLevel, RiskReport, RiskSignal};
-use crate::output::{OutputContext, OutputMode, TableRenderable};
+use crate::output::{OutputContext, OutputMode};
 use crate::store::QuoteStore;
 
 pub async fn handle(
@@ -17,13 +17,12 @@ pub async fn handle(
     config: &AppConfig,
     _store: &QuoteStore,
     api: &ApiClients,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     match cmd.action {
-        RiskAction::Token(args) => token_risk(args, api, config, onchain, output_mode).await,
-        RiskAction::Wallet(args) => wallet_risk(args, config, onchain, output_mode).await,
-        RiskAction::Approval(args) => approval_risk(args, api, config, onchain, output_mode).await,
+        RiskAction::Token(args) => token_risk(args, api, config, output_mode).await,
+        RiskAction::Wallet(args) => wallet_risk(args, config, output_mode).await,
+        RiskAction::Approval(args) => approval_risk(args, api, config, output_mode).await,
     }
 }
 
@@ -31,7 +30,6 @@ async fn token_risk(
     args: crate::cli::risk::TokenRiskArgs,
     api: &ApiClients,
     config: &AppConfig,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     let chain_id = config.effective_chain_id(args.chain_id);
@@ -120,7 +118,6 @@ async fn token_risk(
 async fn wallet_risk(
     args: crate::cli::risk::WalletRiskArgs,
     config: &AppConfig,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     let chain_id = config.effective_chain_id(args.chain_id);
@@ -182,7 +179,6 @@ async fn approval_risk(
     args: crate::cli::risk::ApprovalRiskArgs,
     api: &ApiClients,
     config: &AppConfig,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     let chain_id = config.effective_chain_id(args.chain_id);

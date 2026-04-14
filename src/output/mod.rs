@@ -1,7 +1,6 @@
 pub mod json;
 pub mod table;
 
-use chrono::Utc;
 use serde::Serialize;
 use std::process::ExitCode;
 

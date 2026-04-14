@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -9,22 +9,18 @@ use crate::models::quote::Quote;
 pub struct QuoteStore {
     quotes_dir: PathBuf,
     history_dir: PathBuf,
-    quote_ttl_secs: u64,
 }
 
 impl QuoteStore {
     pub fn new(config: &AppConfig) -> Result<Self> {
         let quotes_dir = config.quotes_dir();
         let history_dir = config.history_dir();
-        let quote_ttl_secs = config.quote_ttl_secs;
-
         std::fs::create_dir_all(&quotes_dir)?;
         std::fs::create_dir_all(&history_dir)?;
 
         Ok(Self {
             quotes_dir,
             history_dir,
-            quote_ttl_secs,
         })
     }
 
@@ -124,7 +120,7 @@ impl QuoteStore {
 mod tests {
     use super::*;
     use crate::config::AppConfig;
-    use crate::models::quote::{Quote, RouteHop, TokenRef};
+    use crate::models::quote::{Quote, TokenRef};
     use crate::models::swap::{ExecutionResult, ExecutionStatus, SwapHistoryRecord};
 
     /// Build a QuoteStore backed by a unique temp directory.

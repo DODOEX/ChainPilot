@@ -7,7 +7,7 @@ use clap::Parser;
 
 #[derive(Parser)]
 #[command(
-    name = "chain",
+    name = "chainpilot",
     version,
     about = "On-chain CLI for DeFi operations",
     long_about = None,

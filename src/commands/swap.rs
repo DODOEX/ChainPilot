@@ -7,12 +7,12 @@ use crate::cli::swap::{
     ApproveArgs, ExecuteArgs, HistoryArgs, QuoteArgs, RevokeArgs, SimulateArgs, StatusArgs,
     SwapAction, SwapCmd,
 };
-use crate::commands::{resolve_token, to_raw_amount};
+use crate::commands::{parse_display_amount, resolve_token, to_raw_amount};
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
 use crate::models::quote::QuoteRequest;
 use crate::models::swap::{ExecutionResult, ExecutionStatus, SimulationResult};
-use crate::output::{OutputContext, OutputMode, TableRenderable};
+use crate::output::{OutputContext, OutputMode};
 use crate::store::QuoteStore;
 
 pub async fn handle(
@@ -20,17 +20,16 @@ pub async fn handle(
     config: &AppConfig,
     store: &QuoteStore,
     api: &ApiClients,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     match cmd.action {
-        SwapAction::Quote(args) => quote(args, config, store, api, onchain, output_mode).await,
-        SwapAction::Simulate(args) => simulate(args, config, store, onchain, output_mode).await,
-        SwapAction::Execute(args) => execute(args, config, store, onchain, output_mode).await,
-        SwapAction::Status(args) => status(args, config, onchain, output_mode).await,
+        SwapAction::Quote(args) => quote(args, config, store, api, output_mode).await,
+        SwapAction::Simulate(args) => simulate(args, config, store, output_mode).await,
+        SwapAction::Execute(args) => execute(args, config, store, output_mode).await,
+        SwapAction::Status(args) => status(args, config, output_mode).await,
         SwapAction::History(args) => history(args, config, store, output_mode).await,
-        SwapAction::Approve(args) => approve(args, config, store, onchain, output_mode).await,
-        SwapAction::Revoke(args) => revoke(args, config, onchain, output_mode).await,
+        SwapAction::Approve(args) => approve(args, config, store, output_mode).await,
+        SwapAction::Revoke(args) => revoke(args, config, output_mode).await,
     }
 }
 
@@ -39,7 +38,6 @@ async fn quote(
     config: &AppConfig,
     store: &QuoteStore,
     api: &ApiClients,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     use crate::chain::{get_allowance, get_balance, get_eth_balance, OnChainClient};
@@ -59,10 +57,12 @@ async fn quote(
         None => Address::ZERO.to_string(),
     };
 
+    let amount_display = parse_display_amount(&args.amount)?;
     let req = QuoteRequest {
         from: from_token.address.clone(),
         to: to_token.address.clone(),
-        amount: args.amount,
+        amount: args.amount.clone(),
+        amount_display,
         chain_id,
         slippage: args.slippage,
     };
@@ -85,7 +85,7 @@ async fn quote(
             let wallet_addr = user_addr
                 .parse::<Address>()
                 .map_err(|_| ChainError::InvalidAddress(user_addr.clone()))?;
-            let amount_raw = to_raw_amount(args.amount, from_token.decimals);
+            let amount_raw = to_raw_amount(&args.amount, from_token.decimals)?;
             let need_raw: u128 = amount_raw.parse().unwrap_or(0);
             let is_native = from_token
                 .address
@@ -171,7 +171,6 @@ async fn simulate(
     args: SimulateArgs,
     config: &AppConfig,
     store: &QuoteStore,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     use crate::chain::{estimate_gas, get_allowance, get_balance, get_eth_balance};
@@ -241,9 +240,12 @@ async fn simulate(
                 let is_native_eth = quote_data.from_token.address.to_lowercase() == ETH_ADDR;
 
                 // Raw from_amount in token's smallest unit
-                let from_amount_raw = (quote_data.from_amount_display
-                    * 10f64.powi(quote_data.from_token.decimals as i32))
-                    as u128;
+                let from_amount_raw = crate::commands::to_raw_amount(
+                    &quote_data.from_amount,
+                    quote_data.from_token.decimals,
+                )?
+                .parse::<u128>()
+                .unwrap_or(0);
 
                 if is_native_eth {
                     match get_eth_balance(onchain, wallet_addr).await {
@@ -367,7 +369,6 @@ async fn execute(
     args: ExecuteArgs,
     config: &AppConfig,
     store: &QuoteStore,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     use crate::chain::{
@@ -609,7 +610,6 @@ async fn execute(
 async fn status(
     args: StatusArgs,
     config: &AppConfig,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     let chain_id = config.effective_chain_id(args.chain_id);
@@ -668,7 +668,6 @@ async fn approve(
     args: ApproveArgs,
     config: &AppConfig,
     store: &QuoteStore,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     use crate::chain::{address_from_private_key, get_token_info, send_tx, OnChainClient};
@@ -738,8 +737,11 @@ async fn approve(
     let (amount_u256, raw_amount_str) = match args.amount {
         None => (U256::MAX, "unlimited".to_string()),
         Some(human) => {
-            let raw = (human * 10f64.powi(decimals as i32)) as u128;
-            (U256::from(raw), raw.to_string())
+            let raw = crate::commands::to_raw_amount(&human, decimals)?;
+            let raw_u128 = raw
+                .parse::<u128>()
+                .map_err(|_| ChainError::InvalidAmount(human.clone()))?;
+            (U256::from(raw_u128), raw)
         }
     };
 
@@ -830,7 +832,6 @@ async fn approve(
 async fn revoke(
     args: RevokeArgs,
     config: &AppConfig,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     use crate::chain::{address_from_private_key, send_tx};

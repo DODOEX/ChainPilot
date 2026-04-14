@@ -66,22 +66,26 @@ fn error_code_and_suggestion(err: &ChainError) -> (String, Option<String>) {
         ChainError::QuoteNotFound(_) => (
             "quote_not_found".to_string(),
             Some(
-                "Run 'chain swap quote --from ETH --to USDC --amount 1' to get a fresh quote."
+                "Run 'chainpilot swap quote --from ETH --to USDC --amount 1' to get a fresh quote."
                     .to_string(),
             ),
         ),
         ChainError::QuoteExpired(_) => (
             "quote_expired".to_string(),
-            Some("Quotes expire after 5 minutes. Run 'chain swap quote' again.".to_string()),
+            Some("Quotes expire after 5 minutes. Run 'chainpilot swap quote' again.".to_string()),
         ),
         ChainError::NoWallet => (
             "no_wallet".to_string(),
             Some("Set PRIVATE_KEY env var or use --private-key flag.".to_string()),
         ),
+        ChainError::InvalidAmount(_) => (
+            "invalid_amount".to_string(),
+            Some("Use a plain decimal amount like '1' or '0.25'.".to_string()),
+        ),
         ChainError::NotApproved { token, spender } => (
             "not_approved".to_string(),
             Some(format!(
-                "Run: chain swap approve --token {} --spender {}",
+                "Run: chainpilot swap approve --token {} --spender {}",
                 token, spender
             )),
         ),

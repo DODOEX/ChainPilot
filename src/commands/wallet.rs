@@ -8,7 +8,7 @@ use crate::commands::resolve_token;
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
 use crate::models::wallet::{TokenBalance, WalletBalance};
-use crate::output::{OutputContext, OutputMode, TableRenderable};
+use crate::output::{OutputContext, OutputMode};
 use crate::store::QuoteStore;
 
 pub async fn handle(
@@ -16,11 +16,10 @@ pub async fn handle(
     config: &AppConfig,
     _store: &QuoteStore,
     api: &ApiClients,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     match cmd.action {
-        WalletAction::Balance(args) => balance(args, api, config, onchain, output_mode).await,
+        WalletAction::Balance(args) => balance(args, api, config, output_mode).await,
     }
 }
 
@@ -28,7 +27,6 @@ async fn balance(
     args: BalanceArgs,
     api: &ApiClients,
     config: &AppConfig,
-    onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     let chain_id = config.effective_chain_id(args.chain_id);

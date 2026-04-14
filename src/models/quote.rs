@@ -51,7 +51,8 @@ pub struct RouteHop {
 pub struct QuoteRequest {
     pub from: String,
     pub to: String,
-    pub amount: f64,
+    pub amount: String,
+    pub amount_display: f64,
     pub chain_id: u64,
     pub slippage: f64,
 }
@@ -164,13 +165,16 @@ mod tests {
         let req = QuoteRequest {
             from: "0xFrom".to_string(),
             to: "0xTo".to_string(),
-            amount: 0.5,
+            amount: "0.5".to_string(),
+            amount_display: 0.5,
             chain_id: 137,
             slippage: 0.5,
         };
         let json = serde_json::to_string(&req).unwrap();
         let back: QuoteRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.from, "0xFrom");
+        assert_eq!(back.amount, "0.5");
+        assert_eq!(back.amount_display, 0.5);
         assert_eq!(back.chain_id, 137);
         assert_eq!(back.slippage, 0.5);
     }

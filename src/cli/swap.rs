@@ -37,7 +37,7 @@ pub struct QuoteArgs {
 
     /// Amount of source token to swap (in human-readable units)
     #[arg(long)]
-    pub amount: f64,
+    pub amount: String,
 
     /// Chain ID (default: 1 for Ethereum mainnet)
     #[arg(long)]
@@ -50,7 +50,7 @@ pub struct QuoteArgs {
 
 #[derive(Args)]
 pub struct SimulateArgs {
-    /// Quote ID returned by `chain swap quote`
+    /// Quote ID returned by `chainpilot swap quote`
     #[arg(long)]
     pub quote_id: String,
 
@@ -61,7 +61,7 @@ pub struct SimulateArgs {
 
 #[derive(Args)]
 pub struct ExecuteArgs {
-    /// Quote ID returned by `chain swap quote`
+    /// Quote ID returned by `chainpilot swap quote`
     #[arg(long)]
     pub quote_id: String,
 
@@ -136,7 +136,7 @@ pub struct ApproveArgs {
 
     /// Amount to approve in human-readable units (omit for unlimited / U256::MAX)
     #[arg(long)]
-    pub amount: Option<f64>,
+    pub amount: Option<String>,
 
     /// Dry-run mode: show what would be approved without sending
     #[arg(long)]
