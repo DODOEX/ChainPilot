@@ -16,8 +16,8 @@ detect_platform() {
     local arch=$(uname -m)
 
     case "$arch" in
-        x86_64) arch="amd64" ;;
-        aarch64|arm64) arch="arm64" ;;
+        x86_64) arch="x86_64" ;;
+        aarch64|arm64) arch="aarch64" ;;
         *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
     esac
 
@@ -34,6 +34,7 @@ download_release() {
     local version="$1"
     local platform="$2"
     local url="https://github.com/${REPO}/releases/download/${version}/${BIN_NAME}-${platform}.tar.gz"
+    local extracted_bin
 
     echo "Downloading ${BIN_NAME} ${version} for ${platform}..."
     if ! curl -fsSL "$url" -o "${TEMP_DIR}/${BIN_NAME}.tar.gz"; then
@@ -43,7 +44,14 @@ download_release() {
 
     mkdir -p "$INSTALL_DIR"
     tar -xzf "${TEMP_DIR}/${BIN_NAME}.tar.gz" -C "$TEMP_DIR"
-    mv "${TEMP_DIR}/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}"
+    extracted_bin=$(find "$TEMP_DIR" -type f -name "$BIN_NAME" -perm -u+x | head -n1)
+
+    if [ -z "$extracted_bin" ]; then
+        echo "Failed to find ${BIN_NAME} in downloaded archive" >&2
+        return 1
+    fi
+
+    mv "$extracted_bin" "${INSTALL_DIR}/${BIN_NAME}"
     chmod +x "${INSTALL_DIR}/${BIN_NAME}"
     echo "Installed to ${INSTALL_DIR}/${BIN_NAME}"
 }
