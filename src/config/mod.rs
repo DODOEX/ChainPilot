@@ -99,6 +99,7 @@ impl AppConfig {
     }
 
     /// Returns the static chain configuration for the active chain_id, if supported.
+    #[cfg(test)]
     pub fn chain_config(&self) -> Option<&'static ChainConfig> {
         chains::chain_config(self.chain_id)
     }

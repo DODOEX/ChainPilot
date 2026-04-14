@@ -310,3 +310,34 @@ fn raw_to_decimal_string(raw: &str, decimals: u8) -> Option<String> {
         Some(format!("{}.{}", int_part, frac_part))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{format_native_value, format_token_amount, raw_to_decimal_string};
+
+    #[test]
+    fn raw_to_decimal_string_cases_are_table_driven() {
+        for (raw, decimals, expected) in [
+            ("1000000", 6, Some("1")),
+            ("1234500", 6, Some("1.2345")),
+            ("5", 18, Some("0.000000000000000005")),
+            ("42", 0, Some("42")),
+            ("", 18, None),
+            ("-1", 18, None),
+        ] {
+            assert_eq!(raw_to_decimal_string(raw, decimals), expected.map(str::to_string));
+        }
+    }
+
+    #[test]
+    fn formatted_amount_helpers_include_units() {
+        assert_eq!(
+            format_token_amount("1234500", 6, "USDC"),
+            "1.2345 USDC (1234500)"
+        );
+        assert_eq!(
+            format_native_value("1000000000000000000"),
+            "1 ETH (1000000000000000000 wei)"
+        );
+    }
+}

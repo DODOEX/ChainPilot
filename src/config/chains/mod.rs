@@ -35,6 +35,7 @@ pub struct ChainContracts {
 
 pub struct ChainConfig {
     pub chain_id: u64,
+    #[allow(dead_code)]
     pub name: &'static str,
     /// Ordered RPC endpoints. The first is used as default when `ETH_RPC_URL` is not set.
     pub rpc_urls: &'static [&'static str],

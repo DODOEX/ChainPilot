@@ -66,13 +66,9 @@ fn error_code_and_suggestion(err: &ChainError) -> (String, Option<String>) {
         ChainError::QuoteNotFound(_) => (
             "quote_not_found".to_string(),
             Some(
-                "Run 'chainpilot swap quote --from ETH --to USDC --amount 1' to get a fresh quote."
+                "The quote may have expired or never existed. Run 'chainpilot swap quote --from ETH --to USDC --amount 1' again."
                     .to_string(),
             ),
-        ),
-        ChainError::QuoteExpired(_) => (
-            "quote_expired".to_string(),
-            Some("Quotes expire after 5 minutes. Run 'chainpilot swap quote' again.".to_string()),
         ),
         ChainError::NoWallet => (
             "no_wallet".to_string(),
@@ -91,5 +87,67 @@ fn error_code_and_suggestion(err: &ChainError) -> (String, Option<String>) {
         ),
         ChainError::InsufficientBalance { .. } => ("insufficient_balance".to_string(), None),
         _ => ("unknown_error".to_string(), None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn meta() -> OutputMeta {
+        OutputMeta {
+            chain_id: 1,
+            dry_run: false,
+            version: "test".to_string(),
+        }
+    }
+
+    #[test]
+    fn success_output_sets_expected_shape() {
+        let out = ChainOutput::success("swap.quote", serde_json::json!({"ok": true}), meta());
+        assert!(out.ok);
+        assert_eq!(out.command, "swap.quote");
+        assert!(out.data.is_some());
+        assert!(out.error.is_none());
+        assert!(out.warnings.is_empty());
+    }
+
+    #[test]
+    fn error_suggestions_are_table_driven() {
+        for (err, code, suggestion_fragment) in [
+            (
+                ChainError::QuoteNotFound("q1".to_string()),
+                "quote_not_found",
+                Some("expired or never existed"),
+            ),
+            (
+                ChainError::InvalidAmount("bad".to_string()),
+                "invalid_amount",
+                Some("plain decimal"),
+            ),
+            (
+                ChainError::InsufficientBalance {
+                    have: "1".to_string(),
+                    need: "2".to_string(),
+                    token: "ETH".to_string(),
+                },
+                "insufficient_balance",
+                None,
+            ),
+        ] {
+            let out = ChainOutput::error("dispatch", &err, meta());
+            let detail = out.error.expect("error detail");
+            assert_eq!(detail.code, code);
+            match suggestion_fragment {
+                Some(fragment) => {
+                    assert!(detail
+                        .suggestion
+                        .as_deref()
+                        .unwrap_or_default()
+                        .contains(fragment))
+                }
+                None => assert!(detail.suggestion.is_none()),
+            }
+        }
     }
 }

@@ -43,6 +43,7 @@ impl QuoteStore {
         Ok(Some(quote))
     }
 
+    #[cfg(test)]
     pub fn delete_quote(&self, quote_id: &str) -> Result<()> {
         let path = self.quote_path(quote_id);
         if path.exists() {

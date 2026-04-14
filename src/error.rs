@@ -13,9 +13,6 @@ pub enum ChainError {
     #[error("RPC error: {0}")]
     Rpc(String),
 
-    #[error("Transaction reverted: {reason}")]
-    Reverted { reason: String },
-
     #[error("Invalid address: {0}")]
     InvalidAddress(String),
 
@@ -38,11 +35,8 @@ pub enum ChainError {
     #[error("Token not approved. Run: chainpilot swap approve --token {token} --spender {spender}")]
     NotApproved { token: String, spender: String },
 
-    #[error("Quote not found: {0}. Quotes expire after 5 minutes.")]
+    #[error("Quote not found or expired: {0}. Run 'chainpilot swap quote' again.")]
     QuoteNotFound(String),
-
-    #[error("Quote expired: {0}")]
-    QuoteExpired(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -83,17 +77,6 @@ mod tests {
     }
 
     #[test]
-    fn reverted_error_message() {
-        let e = ChainError::Reverted {
-            reason: "insufficient output amount".to_string(),
-        };
-        assert_eq!(
-            e.to_string(),
-            "Transaction reverted: insufficient output amount"
-        );
-    }
-
-    #[test]
     fn no_wallet_error_message() {
         let e = ChainError::NoWallet;
         assert!(e.to_string().contains("PRIVATE_KEY"));
@@ -126,11 +109,12 @@ mod tests {
     }
 
     #[test]
-    fn quote_not_found_mentions_expiry() {
+    fn quote_not_found_mentions_expiry_or_missing() {
         let e = ChainError::QuoteNotFound("abc-123".to_string());
         let msg = e.to_string();
         assert!(msg.contains("abc-123"));
-        assert!(msg.contains("5 minutes"));
+        assert!(msg.contains("expired"));
+        assert!(msg.contains("swap quote"));
     }
 
     #[test]
