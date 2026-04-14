@@ -1,4 +1,6 @@
 use chrono::Utc;
+use std::future::Future;
+use std::pin::Pin;
 use std::process::ExitCode;
 
 use crate::api::ApiClients;
@@ -10,10 +12,212 @@ use crate::cli::swap::{
 use crate::commands::{parse_display_amount, resolve_token, to_raw_amount};
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
-use crate::models::quote::QuoteRequest;
+use crate::models::quote::{Quote, QuoteRequest, TokenRef};
 use crate::models::swap::{ExecutionResult, ExecutionStatus, SimulationResult};
 use crate::output::{OutputContext, OutputMode};
 use crate::store::QuoteStore;
+use alloy::primitives::Address;
+
+type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
+
+trait QuoteDeps {
+    fn get_route<'a>(
+        &'a self,
+        req: &'a QuoteRequest,
+        from_token: &'a TokenRef,
+        to_token: &'a TokenRef,
+        user_addr: &'a str,
+        estimate_gas: bool,
+        quote_ttl_secs: u64,
+    ) -> BoxFuture<'a, Result<Quote>>;
+
+    fn get_eth_balance<'a>(&'a self, wallet_addr: Address) -> BoxFuture<'a, Result<(String, f64)>>;
+
+    fn get_balance<'a>(
+        &'a self,
+        token_addr: Address,
+        wallet_addr: Address,
+    ) -> BoxFuture<'a, Result<(String, u8)>>;
+
+    fn get_allowance<'a>(
+        &'a self,
+        token_addr: Address,
+        wallet_addr: Address,
+        spender: Address,
+    ) -> BoxFuture<'a, Result<String>>;
+}
+
+struct LiveQuoteDeps<'a> {
+    api: &'a ApiClients,
+    onchain: &'a OnChainClient,
+}
+
+impl QuoteDeps for LiveQuoteDeps<'_> {
+    fn get_route<'a>(
+        &'a self,
+        req: &'a QuoteRequest,
+        from_token: &'a TokenRef,
+        to_token: &'a TokenRef,
+        user_addr: &'a str,
+        estimate_gas: bool,
+        quote_ttl_secs: u64,
+    ) -> BoxFuture<'a, Result<Quote>> {
+        Box::pin(async move {
+            self.api
+                .dodo
+                .get_route(
+                    req,
+                    from_token,
+                    to_token,
+                    user_addr,
+                    estimate_gas,
+                    quote_ttl_secs,
+                )
+                .await
+        })
+    }
+
+    fn get_eth_balance<'a>(&'a self, wallet_addr: Address) -> BoxFuture<'a, Result<(String, f64)>> {
+        Box::pin(async move { crate::chain::get_eth_balance(self.onchain, wallet_addr).await })
+    }
+
+    fn get_balance<'a>(
+        &'a self,
+        token_addr: Address,
+        wallet_addr: Address,
+    ) -> BoxFuture<'a, Result<(String, u8)>> {
+        Box::pin(async move { crate::chain::get_balance(self.onchain, token_addr, wallet_addr).await })
+    }
+
+    fn get_allowance<'a>(
+        &'a self,
+        token_addr: Address,
+        wallet_addr: Address,
+        spender: Address,
+    ) -> BoxFuture<'a, Result<String>> {
+        Box::pin(async move {
+            crate::chain::get_allowance(self.onchain, token_addr, wallet_addr, spender).await
+        })
+    }
+}
+
+trait ExecuteDeps {
+    fn estimate_gas<'a>(
+        &'a self,
+        from: Address,
+        to: Address,
+        data: &'a str,
+        value: &'a str,
+    ) -> BoxFuture<'a, Result<u64>>;
+
+    fn get_nonce<'a>(&'a self, address: Address) -> BoxFuture<'a, Result<u64>>;
+
+    fn send_tx<'a>(
+        &'a self,
+        chain_id: u64,
+        private_key: &'a str,
+        to: Address,
+        data: &'a str,
+        value_hex: &'a str,
+        gas_limit: Option<u64>,
+        max_fee_gwei: Option<f64>,
+    ) -> BoxFuture<'a, Result<(Address, String)>>;
+
+    fn get_tx_receipt<'a>(&'a self, tx_hash: &'a str) -> BoxFuture<'a, Result<Option<crate::chain::TxStatus>>>;
+}
+
+struct LiveExecuteDeps<'a> {
+    onchain: &'a OnChainClient,
+    exec_rpc_url: &'a str,
+}
+
+impl ExecuteDeps for LiveExecuteDeps<'_> {
+    fn estimate_gas<'a>(
+        &'a self,
+        from: Address,
+        to: Address,
+        data: &'a str,
+        value: &'a str,
+    ) -> BoxFuture<'a, Result<u64>> {
+        Box::pin(async move { crate::chain::estimate_gas(self.onchain, from, to, data, value).await })
+    }
+
+    fn get_nonce<'a>(&'a self, address: Address) -> BoxFuture<'a, Result<u64>> {
+        Box::pin(async move { crate::chain::get_nonce(self.onchain, address).await })
+    }
+
+    fn send_tx<'a>(
+        &'a self,
+        chain_id: u64,
+        private_key: &'a str,
+        to: Address,
+        data: &'a str,
+        value_hex: &'a str,
+        gas_limit: Option<u64>,
+        max_fee_gwei: Option<f64>,
+    ) -> BoxFuture<'a, Result<(Address, String)>> {
+        Box::pin(async move {
+            crate::chain::send_tx(
+                self.exec_rpc_url,
+                chain_id,
+                private_key,
+                to,
+                data,
+                value_hex,
+                gas_limit,
+                max_fee_gwei,
+            )
+            .await
+        })
+    }
+
+    fn get_tx_receipt<'a>(
+        &'a self,
+        tx_hash: &'a str,
+    ) -> BoxFuture<'a, Result<Option<crate::chain::TxStatus>>> {
+        Box::pin(async move { crate::chain::get_tx_receipt(self.onchain, tx_hash).await })
+    }
+}
+
+trait ApprovalDeps {
+    fn send_tx<'a>(
+        &'a self,
+        chain_id: u64,
+        private_key: &'a str,
+        to: Address,
+        data: &'a str,
+        value_hex: &'a str,
+    ) -> BoxFuture<'a, Result<(Address, String)>>;
+}
+
+struct LiveApprovalDeps<'a> {
+    chain_rpc: &'a str,
+}
+
+impl ApprovalDeps for LiveApprovalDeps<'_> {
+    fn send_tx<'a>(
+        &'a self,
+        chain_id: u64,
+        private_key: &'a str,
+        to: Address,
+        data: &'a str,
+        value_hex: &'a str,
+    ) -> BoxFuture<'a, Result<(Address, String)>> {
+        Box::pin(async move {
+            crate::chain::send_tx(
+                self.chain_rpc,
+                chain_id,
+                private_key,
+                to,
+                data,
+                value_hex,
+                None,
+                None,
+            )
+            .await
+        })
+    }
+}
 
 pub async fn handle(
     cmd: SwapCmd,
@@ -40,9 +244,6 @@ async fn quote(
     api: &ApiClients,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    use crate::chain::{get_allowance, get_balance, get_eth_balance, OnChainClient};
-    use alloy::primitives::Address;
-
     let chain_id = config.effective_chain_id(args.chain_id);
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_onchain;
@@ -67,32 +268,52 @@ async fn quote(
         slippage: args.slippage,
     };
 
+    let deps = LiveQuoteDeps { api, onchain };
+    let quote =
+        fetch_quote_with_fallback(&deps, &req, &from_token, &to_token, &user_addr, config).await?;
+    store.save_quote(&quote)?;
+
+    Ok(crate::output::print_output::<crate::models::quote::Quote>(
+        Ok(quote),
+        "swap.quote",
+        output_mode,
+        OutputContext::new(chain_id, false),
+    ))
+}
+
+async fn fetch_quote_with_fallback<D: QuoteDeps>(
+    deps: &D,
+    req: &QuoteRequest,
+    from_token: &TokenRef,
+    to_token: &TokenRef,
+    user_addr: &str,
+    config: &AppConfig,
+) -> Result<Quote> {
     let estimate_gas = user_addr != Address::ZERO.to_string();
-    let quote = match api
-        .dodo
+    match deps
         .get_route(
-            &req,
-            &from_token,
-            &to_token,
-            &user_addr,
+            req,
+            from_token,
+            to_token,
+            user_addr,
             estimate_gas,
             config.quote_ttl_secs,
         )
         .await
     {
-        Ok(quote) => quote,
+        Ok(quote) => Ok(quote),
         Err(err) if estimate_gas => {
             let wallet_addr = user_addr
                 .parse::<Address>()
-                .map_err(|_| ChainError::InvalidAddress(user_addr.clone()))?;
-            let amount_raw = to_raw_amount(&args.amount, from_token.decimals)?;
+                .map_err(|_| ChainError::InvalidAddress(user_addr.to_string()))?;
+            let amount_raw = to_raw_amount(&req.amount, from_token.decimals)?;
             let need_raw: u128 = amount_raw.parse().unwrap_or(0);
             let is_native = from_token
                 .address
                 .eq_ignore_ascii_case(crate::config::chains::NATIVE_ADDR);
 
             if is_native {
-                let (have_raw, _) = get_eth_balance(onchain, wallet_addr).await?;
+                let (have_raw, _) = deps.get_eth_balance(wallet_addr).await?;
                 let have: u128 = have_raw.parse().unwrap_or(0);
                 if have < need_raw {
                     return Err(ChainError::InsufficientBalance {
@@ -107,7 +328,7 @@ async fn quote(
                     .address
                     .parse::<Address>()
                     .map_err(|_| ChainError::InvalidAddress(from_token.address.clone()))?;
-                let (have_raw, _) = get_balance(onchain, token_addr, wallet_addr).await?;
+                let (have_raw, _) = deps.get_balance(token_addr, wallet_addr).await?;
                 let have: u128 = have_raw.parse().unwrap_or(0);
                 if have < need_raw {
                     return Err(ChainError::InsufficientBalance {
@@ -118,7 +339,7 @@ async fn quote(
                     .into());
                 }
 
-                if let Some(chain_cfg) = config.chain_config_for(Some(chain_id)) {
+                if let Some(chain_cfg) = config.chain_config_for(Some(req.chain_id)) {
                     let spender = chain_cfg
                         .contracts
                         .dodo_approve
@@ -126,8 +347,7 @@ async fn quote(
                         .map_err(|_| {
                             ChainError::InvalidAddress(chain_cfg.contracts.dodo_approve.to_string())
                         })?;
-                    let allowance_raw =
-                        get_allowance(onchain, token_addr, wallet_addr, spender).await?;
+                    let allowance_raw = deps.get_allowance(token_addr, wallet_addr, spender).await?;
                     let allowance: u128 = allowance_raw.parse().unwrap_or(0);
                     if allowance < need_raw {
                         return Err(ChainError::NotApproved {
@@ -139,32 +359,23 @@ async fn quote(
                 }
             }
 
-            match api
-                .dodo
+            match deps
                 .get_route(
-                    &req,
-                    &from_token,
-                    &to_token,
-                    &user_addr,
+                    req,
+                    from_token,
+                    to_token,
+                    user_addr,
                     false,
                     config.quote_ttl_secs,
                 )
                 .await
             {
-                Ok(quote) => quote,
-                Err(_) => return Err(err.into()),
+                Ok(quote) => Ok(quote),
+                Err(_) => Err(err),
             }
         }
-        Err(err) => return Err(err.into()),
-    };
-    store.save_quote(&quote)?;
-
-    Ok(crate::output::print_output::<crate::models::quote::Quote>(
-        Ok(quote),
-        "swap.quote",
-        output_mode,
-        OutputContext::new(chain_id, false),
-    ))
+        Err(err) => Err(err),
+    }
 }
 
 async fn simulate(
@@ -189,29 +400,13 @@ async fn simulate(
     };
     let chain_id = quote_data.chain_id;
 
-    if Utc::now() > quote_data.expires_at {
-        return Ok(crate::output::print_output::<SimulationResult>(
-            Err(ChainError::QuoteExpired(args.quote_id)),
-            "swap.simulate",
-            output_mode,
-            OutputContext::new(chain_id, false),
-        ));
-    }
-
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_onchain;
 
-    let mut warnings = Vec::new();
+    let mut warnings = simulation_base_warnings(&quote_data);
     let mut is_valid = true;
 
     let mut estimated_gas = quote_data.estimated_gas.or(quote_data.gas_limit);
-    if estimated_gas.is_none() {
-        warnings.push("Quote did not include gas estimate or gas limit.".to_string());
-    }
-
-    if quote_data.route_summary.is_empty() {
-        warnings.push("Route summary is empty in the quote response.".to_string());
-    }
 
     let gas_price_gwei = match crate::chain::get_gas_price_gwei(onchain).await {
         Ok(price) => price,
@@ -221,9 +416,7 @@ async fn simulate(
         }
     };
 
-    let mut total_gas_cost_eth = estimated_gas
-        .map(|gas| gas as f64 * gas_price_gwei / 1e9)
-        .unwrap_or(0.0);
+    let mut total_gas_cost_eth = simulation_gas_cost_eth(estimated_gas, gas_price_gwei);
 
     // Wallet-specific checks (balance + allowance + eth_estimateGas pre-execution)
     let mut wallet_balance: Option<String> = None;
@@ -322,7 +515,8 @@ async fn simulate(
                         {
                             Ok(gas) => {
                                 estimated_gas = Some(gas);
-                                total_gas_cost_eth = gas as f64 * gas_price_gwei / 1e9;
+                                total_gas_cost_eth =
+                                    simulation_gas_cost_eth(Some(gas), gas_price_gwei);
                             }
                             Err(e) => {
                                 is_valid = false;
@@ -365,18 +559,138 @@ async fn simulate(
     ))
 }
 
+fn simulation_base_warnings(quote: &Quote) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if quote.estimated_gas.is_none() && quote.gas_limit.is_none() {
+        warnings.push("Quote did not include gas estimate or gas limit.".to_string());
+    }
+    if quote.route_summary.is_empty() {
+        warnings.push("Route summary is empty in the quote response.".to_string());
+    }
+    warnings
+}
+
+fn simulation_gas_cost_eth(estimated_gas: Option<u64>, gas_price_gwei: f64) -> f64 {
+    estimated_gas
+        .map(|gas| gas as f64 * gas_price_gwei / 1e9)
+        .unwrap_or(0.0)
+}
+
+fn dry_run_from_address(
+    derived_from_private_key: Option<String>,
+    subcommand_wallet: Option<String>,
+    global_wallet: Option<String>,
+) -> Option<String> {
+    derived_from_private_key
+        .or(subcommand_wallet)
+        .or(global_wallet)
+}
+
+fn resolve_effective_gas_limit(
+    user_gas_limit: Option<u64>,
+    skip_estimate: bool,
+    quote_estimated_gas: Option<u64>,
+    quote_gas_limit: Option<u64>,
+    estimated_gas_from_node: Option<u64>,
+    gas_buffer_pct: Option<u64>,
+) -> Option<u64> {
+    if let Some(user_gas) = user_gas_limit {
+        return Some(user_gas);
+    }
+    if skip_estimate {
+        return quote_estimated_gas.or(quote_gas_limit);
+    }
+    estimated_gas_from_node.map(|gas| {
+        if let Some(pct) = gas_buffer_pct {
+            gas + gas * pct / 100
+        } else {
+            gas
+        }
+    })
+}
+
+fn resolve_approve_targets(
+    explicit_token: Option<&str>,
+    quote: Option<&Quote>,
+    explicit_spender: Option<&str>,
+    chain_id: u64,
+) -> Result<(String, String)> {
+    let token = explicit_token
+        .map(str::to_string)
+        .or_else(|| quote.map(|q| q.from_token.address.clone()))
+        .ok_or_else(|| ChainError::Config("--token or --quote-id is required".to_string()))?;
+
+    let spender = if let Some(s) = explicit_spender {
+        s.to_string()
+    } else if quote.is_some() {
+        crate::config::chain_config(chain_id)
+            .map(|c| c.contracts.dodo_approve.to_string())
+            .ok_or_else(|| {
+                ChainError::Config(format!(
+                    "no chain config for chain_id {}; use --spender to set the approve address",
+                    chain_id
+                ))
+            })?
+    } else {
+        return Err(ChainError::Config(
+            "--spender or --quote-id is required".to_string(),
+        ));
+    };
+
+    Ok((token, spender))
+}
+
+fn approve_calldata(spender_addr: Address, amount_u256: alloy::primitives::U256) -> String {
+    let selector = [0x09u8, 0x5e, 0xa7, 0xb3];
+    let mut calldata = Vec::with_capacity(68);
+    calldata.extend_from_slice(&selector);
+    calldata.extend_from_slice(&[0u8; 12]);
+    calldata.extend_from_slice(spender_addr.as_slice());
+    calldata.extend_from_slice(&amount_u256.to_be_bytes::<32>());
+    format!("0x{}", hex::encode(&calldata))
+}
+
+fn revoke_calldata(spender_addr: Address) -> String {
+    let selector = [0x09u8, 0x5e, 0xa7, 0xb3];
+    let mut calldata = Vec::with_capacity(68);
+    calldata.extend_from_slice(&selector);
+    calldata.extend_from_slice(&[0u8; 12]);
+    calldata.extend_from_slice(spender_addr.as_slice());
+    calldata.extend_from_slice(&[0u8; 32]);
+    format!("0x{}", hex::encode(&calldata))
+}
+
+async fn send_approval_with_deps<D: ApprovalDeps>(
+    deps: &D,
+    chain_id: u64,
+    private_key: &str,
+    token_addr: Address,
+    spender_addr: Address,
+    raw_amount: String,
+    calldata_hex: &str,
+) -> Result<crate::models::swap::ApprovalResult> {
+    use crate::chain::address_from_private_key;
+    let from_addr = address_from_private_key(private_key)?;
+    let (_from, tx_hash) = deps
+        .send_tx(chain_id, private_key, token_addr, calldata_hex, "0x0")
+        .await?;
+
+    Ok(crate::models::swap::ApprovalResult {
+        token: token_addr.to_string(),
+        spender: spender_addr.to_string(),
+        raw_amount,
+        dry_run: false,
+        tx_hash: Some(tx_hash),
+        from_address: Some(from_addr.to_string()),
+    })
+}
+
 async fn execute(
     args: ExecuteArgs,
     config: &AppConfig,
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    use crate::chain::{
-        address_from_private_key, estimate_gas, get_nonce, get_tx_receipt, send_tx,
-    };
-    use alloy::primitives::Address;
-    use std::time::Duration;
-
     let quote_data = match store.load_quote(&args.quote_id)? {
         Some(q) => q,
         None => {
@@ -390,203 +704,25 @@ async fn execute(
     };
     let chain_id = quote_data.chain_id;
 
-    if Utc::now() > quote_data.expires_at {
-        return Ok(crate::output::print_output::<ExecutionResult>(
-            Err(ChainError::QuoteExpired(args.quote_id.clone())),
-            "swap.execute",
-            output_mode,
-            OutputContext::new(chain_id, args.dry_run),
-        ));
-    }
-
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
-    let onchain = &chain_onchain;
     let exec_rpc_url = crate::config::chain_config(chain_id)
         .and_then(|c| c.rpc_urls.first().copied())
         .unwrap_or(config.rpc_url.as_str())
         .to_string();
-
-    // Resolve private key: CLI arg takes precedence over env (already handled by clap)
-    let private_key = args.private_key.as_deref();
-
-    if !args.dry_run && private_key.is_none() {
-        return Ok(crate::output::print_output::<ExecutionResult>(
-            Err(ChainError::NoWallet),
-            "swap.execute",
-            output_mode,
-            OutputContext::new(chain_id, args.dry_run),
-        ));
-    }
-
-    let (from_address, tx_hash, status, gas_used, effective_gas_price_gwei) = if args.dry_run {
-        // In dry-run, derive from_address from private key if available,
-        // else from the subcommand wallet, else from the global wallet address.
-        let addr = private_key
-            .and_then(|pk| address_from_private_key(pk).ok())
-            .map(|a| a.to_string())
-            .or_else(|| args.wallet.clone())
-            .or_else(|| config.wallet_address.clone());
-        (addr, None, ExecutionStatus::DryRun, None, None)
-    } else {
-        let pk = private_key.unwrap(); // safe: checked above
-        let to_addr: Address = match quote_data.router_to.parse() {
-            Ok(a) => a,
-            Err(_) => {
-                return Ok(crate::output::print_output::<ExecutionResult>(
-                    Err(ChainError::InvalidAddress(quote_data.router_to.clone())),
-                    "swap.execute",
-                    output_mode,
-                    OutputContext::new(chain_id, args.dry_run),
-                ));
-            }
-        };
-
-        // Derive from_address early; needed for eth_estimateGas and populating the result.
-        let from_addr = match address_from_private_key(pk) {
-            Ok(a) => a,
-            Err(e) => {
-                return Ok(crate::output::print_output::<ExecutionResult>(
-                    Err(e),
-                    "swap.execute",
-                    output_mode,
-                    OutputContext::new(chain_id, args.dry_run),
-                ));
-            }
-        };
-
-        // eth_estimateGas: more accurate than the quote's stale estimate, and catches
-        // reverts before we pay gas to broadcast a doomed transaction.
-        // Precedence: --gas-limit > eth_estimateGas (unless --skip-estimate) > quote gas > None (node estimates)
-        let effective_gas_limit = if let Some(user_gas) = args.gas_limit {
-            Some(user_gas)
-        } else if args.skip_estimate {
-            quote_data.estimated_gas.or(quote_data.gas_limit)
-        } else {
-            match estimate_gas(
-                onchain,
-                from_addr,
-                to_addr,
-                &quote_data.calldata,
-                &quote_data.value,
-            )
-            .await
-            {
-                Ok(gas) => Some(if let Some(pct) = args.gas_buffer_pct {
-                    gas + gas * pct / 100
-                } else {
-                    gas
-                }),
-                Err(e) => {
-                    return Ok(crate::output::print_output::<ExecutionResult>(
-                        Err(e),
-                        "swap.execute",
-                        output_mode,
-                        OutputContext::new(chain_id, args.dry_run),
-                    ));
-                }
-            }
-        };
-
-        // Snapshot confirmed nonce before broadcasting; used to detect cancellation during --wait.
-        let tx_nonce = get_nonce(onchain, from_addr).await.unwrap_or(0);
-
-        match send_tx(
-            &exec_rpc_url,
-            quote_data.chain_id,
-            pk,
-            to_addr,
-            &quote_data.calldata,
-            &quote_data.value,
-            effective_gas_limit,
-            args.max_fee_gwei,
-        )
-        .await
-        {
-            Err(e) => {
-                return Ok(crate::output::print_output::<ExecutionResult>(
-                    Err(e),
-                    "swap.execute",
-                    output_mode,
-                    OutputContext::new(chain_id, args.dry_run),
-                ));
-            }
-            Ok((_from_addr, hash)) => {
-                let from_str = Some(from_addr.to_string());
-                let tx_hash_str = hash;
-
-                // Optionally wait for the tx to be mined and report the final on-chain status.
-                // Possible outcomes:
-                //   Confirmed  — mined, EVM execution succeeded (receipt.status = 1)
-                //   Failed     — mined, EVM execution reverted (receipt.status = 0)
-                //   Cancelled  — nonce advanced with no receipt: tx was replaced or dropped
-                //   Submitted  — still in mempool after timeout (rare; tx not yet mined)
-                let (final_status, gas_used, effective_gas_price_gwei) = if args.wait {
-                    const POLL_INTERVAL: Duration = Duration::from_secs(3);
-                    const MAX_POLLS: u32 = 100; // ~5 minutes
-                    let mut polls = 0u32;
-                    let mut outcome = (ExecutionStatus::Submitted, None, None);
-                    loop {
-                        tokio::time::sleep(POLL_INTERVAL).await;
-                        // 1. Check for receipt first.
-                        match get_tx_receipt(onchain, &tx_hash_str).await {
-                            Ok(Some(receipt)) => {
-                                let status = if receipt.success {
-                                    ExecutionStatus::Confirmed
-                                } else {
-                                    ExecutionStatus::Failed
-                                };
-                                outcome = (status, receipt.gas_used, receipt.effective_gas_price);
-                                break;
-                            }
-                            Err(e) => {
-                                eprintln!("Warning: error polling receipt: {}", e);
-                                break;
-                            }
-                            Ok(None) => {}
-                        }
-                        // 2. No receipt yet — check if nonce advanced (tx replaced/dropped).
-                        if let Ok(current_nonce) = get_nonce(onchain, from_addr).await {
-                            if current_nonce > tx_nonce {
-                                outcome = (ExecutionStatus::Cancelled, None, None);
-                                break;
-                            }
-                        }
-                        polls += 1;
-                        if polls >= MAX_POLLS {
-                            eprintln!(
-                                "Warning: timed out waiting for receipt; tx may still be pending."
-                            );
-                            break;
-                        }
-                    }
-                    outcome
-                } else {
-                    (ExecutionStatus::Submitted, None, None)
-                };
-
-                (
-                    from_str,
-                    Some(tx_hash_str),
-                    final_status,
-                    gas_used,
-                    effective_gas_price_gwei,
-                )
-            }
-        }
+    let deps = LiveExecuteDeps {
+        onchain: &chain_onchain,
+        exec_rpc_url: &exec_rpc_url,
     };
-
-    let result = ExecutionResult {
-        quote_id: quote_data.quote_id,
-        executed_at: Utc::now(),
-        dry_run: args.dry_run,
-        tx_hash,
-        status,
-        calldata: quote_data.calldata.clone(),
-        to_contract: quote_data.router_to.clone(),
-        value_eth: quote_data.value.clone(),
-        from_address,
-        gas_used,
-        effective_gas_price_gwei,
+    let result = match execute_quote_with_deps(&deps, &args, config, &quote_data).await {
+        Ok(result) => result,
+        Err(e) => {
+            return Ok(crate::output::print_output::<ExecutionResult>(
+                Err(e),
+                "swap.execute",
+                output_mode,
+                OutputContext::new(chain_id, args.dry_run),
+            ));
+        }
     };
 
     // Persist to history
@@ -605,6 +741,133 @@ async fn execute(
         output_mode,
         OutputContext::new(chain_id, args.dry_run),
     ))
+}
+
+async fn execute_quote_with_deps<D: ExecuteDeps>(
+    deps: &D,
+    args: &ExecuteArgs,
+    config: &AppConfig,
+    quote_data: &Quote,
+) -> Result<ExecutionResult> {
+    use crate::chain::address_from_private_key;
+    use alloy::primitives::Address;
+    use std::time::Duration;
+
+    let private_key = args.private_key.as_deref();
+
+    if !args.dry_run && private_key.is_none() {
+        return Err(ChainError::NoWallet);
+    }
+
+    let (from_address, tx_hash, status, gas_used, effective_gas_price_gwei) = if args.dry_run {
+        let addr = dry_run_from_address(
+            private_key
+                .and_then(|pk| address_from_private_key(pk).ok())
+                .map(|a| a.to_string()),
+            args.wallet.clone(),
+            config.wallet_address.clone(),
+        );
+        (addr, None, ExecutionStatus::DryRun, None, None)
+    } else {
+        let pk = private_key.unwrap();
+        let to_addr: Address = quote_data
+            .router_to
+            .parse()
+            .map_err(|_| ChainError::InvalidAddress(quote_data.router_to.clone()))?;
+        let from_addr = address_from_private_key(pk)?;
+
+        let estimated_gas_from_node = if args.gas_limit.is_none() && !args.skip_estimate {
+            Some(
+                deps.estimate_gas(from_addr, to_addr, &quote_data.calldata, &quote_data.value)
+                    .await?,
+            )
+        } else {
+            None
+        };
+        let effective_gas_limit = resolve_effective_gas_limit(
+            args.gas_limit,
+            args.skip_estimate,
+            quote_data.estimated_gas,
+            quote_data.gas_limit,
+            estimated_gas_from_node,
+            args.gas_buffer_pct,
+        );
+
+        let tx_nonce = deps.get_nonce(from_addr).await.unwrap_or(0);
+        let (_sent_from, tx_hash_str) = deps
+            .send_tx(
+                quote_data.chain_id,
+                pk,
+                to_addr,
+                &quote_data.calldata,
+                &quote_data.value,
+                effective_gas_limit,
+                args.max_fee_gwei,
+            )
+            .await?;
+
+        let (final_status, gas_used, effective_gas_price_gwei) = if args.wait {
+            const POLL_INTERVAL: Duration = Duration::from_secs(3);
+            const MAX_POLLS: u32 = 100;
+            let mut polls = 0u32;
+            let mut outcome = (ExecutionStatus::Submitted, None, None);
+            loop {
+                tokio::time::sleep(POLL_INTERVAL).await;
+                match deps.get_tx_receipt(&tx_hash_str).await {
+                    Ok(Some(receipt)) => {
+                        let status = if receipt.success {
+                            ExecutionStatus::Confirmed
+                        } else {
+                            ExecutionStatus::Failed
+                        };
+                        outcome = (status, receipt.gas_used, receipt.effective_gas_price);
+                        break;
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: error polling receipt: {}", e);
+                        break;
+                    }
+                    Ok(None) => {}
+                }
+                if let Ok(current_nonce) = deps.get_nonce(from_addr).await {
+                    if current_nonce > tx_nonce {
+                        outcome = (ExecutionStatus::Cancelled, None, None);
+                        break;
+                    }
+                }
+                polls += 1;
+                if polls >= MAX_POLLS {
+                    eprintln!("Warning: timed out waiting for receipt; tx may still be pending.");
+                    break;
+                }
+            }
+            outcome
+        } else {
+            (ExecutionStatus::Submitted, None, None)
+        };
+
+        (
+            Some(from_addr.to_string()),
+            Some(tx_hash_str),
+            final_status,
+            gas_used,
+            effective_gas_price_gwei,
+        )
+    };
+
+    Ok(ExecutionResult {
+        quote_id: quote_data.quote_id,
+        executed_at: Utc::now(),
+        dry_run: args.dry_run,
+        tx_hash,
+        status,
+        calldata: quote_data.calldata.clone(),
+        to_contract: quote_data.router_to.clone(),
+        value_eth: quote_data.value.clone(),
+        from_address,
+        gas_used,
+        effective_gas_price_gwei,
+    })
 }
 
 async fn status(
@@ -670,7 +933,7 @@ async fn approve(
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    use crate::chain::{address_from_private_key, get_token_info, send_tx, OnChainClient};
+    use crate::chain::{get_token_info, OnChainClient};
     use crate::models::swap::ApprovalResult;
     use alloy::primitives::{Address, U256};
 
@@ -688,32 +951,12 @@ async fn approve(
         None => None,
     };
 
-    // Resolve token address: explicit arg > quote's from-token.
-    let token_str = args
-        .token
-        .as_deref()
-        .map(|s| s.to_string())
-        .or_else(|| quote.as_ref().map(|q| q.from_token.address.clone()))
-        .ok_or_else(|| ChainError::Config("--token or --quote-id is required".to_string()))?;
-
-    // Resolve spender: explicit --spender takes highest precedence.
-    // When --quote-id is given without --spender, use the chain's DODOApprove contract.
-    let spender_str = if let Some(s) = args.spender.as_deref() {
-        s.to_string()
-    } else if quote.is_some() {
-        crate::config::chain_config(chain_id)
-            .map(|c| c.contracts.dodo_approve.to_string())
-            .ok_or_else(|| {
-                ChainError::Config(format!(
-                    "no chain config for chain_id {}; use --spender to set the approve address",
-                    chain_id
-                ))
-            })?
-    } else {
-        return Err(ChainError::Config(
-            "--spender or --quote-id is required".to_string(),
-        ));
-    };
+    let (token_str, spender_str) = resolve_approve_targets(
+        args.token.as_deref(),
+        quote.as_ref(),
+        args.spender.as_deref(),
+        chain_id,
+    )?;
 
     let token_addr: Address = token_str
         .parse()
@@ -749,83 +992,53 @@ async fn approve(
     //   selector  = keccak256("approve(address,uint256)")[0..4] = 0x095ea7b3
     //   arg[0]    = spender padded to 32 bytes (12 zeros + 20-byte address)
     //   arg[1]    = amount as 32-byte big-endian
-    let selector = [0x09u8, 0x5e, 0xa7, 0xb3];
-    let mut calldata = Vec::with_capacity(68);
-    calldata.extend_from_slice(&selector);
-    calldata.extend_from_slice(&[0u8; 12]);
-    calldata.extend_from_slice(spender_addr.as_slice());
-    calldata.extend_from_slice(&amount_u256.to_be_bytes::<32>());
-    let calldata_hex = format!("0x{}", hex::encode(&calldata));
+    let calldata_hex = approve_calldata(spender_addr, amount_u256);
 
     let private_key = args.private_key.as_deref();
 
     if args.dry_run || private_key.is_none() {
-        let from_address = private_key
-            .and_then(|pk| address_from_private_key(pk).ok())
-            .map(|a| a.to_string());
         let result = ApprovalResult {
             token: token_addr.to_string(),
             spender: spender_addr.to_string(),
             raw_amount: raw_amount_str,
             dry_run: true,
             tx_hash: None,
-            from_address,
+            from_address: private_key
+                .and_then(|pk| crate::chain::address_from_private_key(pk).ok())
+                .map(|a| a.to_string()),
         };
+        let dry_run = result.dry_run;
         return Ok(crate::output::print_output::<ApprovalResult>(
             Ok(result),
             "swap.approve",
             output_mode,
-            OutputContext::new(chain_id, true),
+            OutputContext::new(chain_id, dry_run),
         ));
     }
 
-    let pk = private_key.unwrap();
-    let from_addr = match address_from_private_key(pk) {
-        Ok(a) => a,
-        Err(e) => {
-            return Ok(crate::output::print_output::<ApprovalResult>(
-                Err(e),
-                "swap.approve",
-                output_mode,
-                OutputContext::new(chain_id, false),
-            ));
-        }
-    };
-
-    match send_tx(
-        &chain_rpc,
+    match send_approval_with_deps(
+        &LiveApprovalDeps { chain_rpc: &chain_rpc },
         chain_id,
-        pk,
+        private_key.unwrap(),
         token_addr,
+        spender_addr,
+        raw_amount_str,
         &calldata_hex,
-        "0x0",
-        None,
-        None,
     )
     .await
     {
+        Ok(result) => Ok(crate::output::print_output::<ApprovalResult>(
+            Ok(result),
+            "swap.approve",
+            output_mode,
+            OutputContext::new(chain_id, false),
+        )),
         Err(e) => Ok(crate::output::print_output::<ApprovalResult>(
             Err(e),
             "swap.approve",
             output_mode,
             OutputContext::new(chain_id, false),
         )),
-        Ok((_addr, tx_hash)) => {
-            let result = ApprovalResult {
-                token: token_addr.to_string(),
-                spender: spender_addr.to_string(),
-                raw_amount: raw_amount_str,
-                dry_run: false,
-                tx_hash: Some(tx_hash),
-                from_address: Some(from_addr.to_string()),
-            };
-            Ok(crate::output::print_output::<ApprovalResult>(
-                Ok(result),
-                "swap.approve",
-                output_mode,
-                OutputContext::new(chain_id, false),
-            ))
-        }
     }
 }
 
@@ -834,7 +1047,6 @@ async fn revoke(
     config: &AppConfig,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    use crate::chain::{address_from_private_key, send_tx};
     use crate::models::swap::ApprovalResult;
     use alloy::primitives::Address;
 
@@ -868,82 +1080,708 @@ async fn revoke(
     };
 
     // approve(address,uint256) with amount 0 revokes ERC-20 allowance.
-    let selector = [0x09u8, 0x5e, 0xa7, 0xb3];
-    let mut calldata = Vec::with_capacity(68);
-    calldata.extend_from_slice(&selector);
-    calldata.extend_from_slice(&[0u8; 12]);
-    calldata.extend_from_slice(spender_addr.as_slice());
-    calldata.extend_from_slice(&[0u8; 32]);
-    let calldata_hex = format!("0x{}", hex::encode(&calldata));
+    let calldata_hex = revoke_calldata(spender_addr);
 
     let private_key = args.private_key.as_deref();
 
     if args.dry_run || private_key.is_none() {
-        let from_address = private_key
-            .and_then(|pk| address_from_private_key(pk).ok())
-            .map(|a| a.to_string());
         let result = ApprovalResult {
             token: token_addr.to_string(),
             spender: spender_addr.to_string(),
             raw_amount: "0".to_string(),
             dry_run: true,
             tx_hash: None,
-            from_address,
+            from_address: private_key
+                .and_then(|pk| crate::chain::address_from_private_key(pk).ok())
+                .map(|a| a.to_string()),
         };
+        let dry_run = result.dry_run;
         return Ok(crate::output::print_output::<ApprovalResult>(
             Ok(result),
             "swap.revoke",
             output_mode,
-            OutputContext::new(chain_id, true),
+            OutputContext::new(chain_id, dry_run),
         ));
     }
-
-    let pk = private_key.unwrap();
-    let from_addr = match address_from_private_key(pk) {
-        Ok(a) => a,
-        Err(e) => {
-            return Ok(crate::output::print_output::<ApprovalResult>(
-                Err(e),
-                "swap.revoke",
-                output_mode,
-                OutputContext::new(chain_id, false),
-            ));
-        }
-    };
-
-    match send_tx(
-        &chain_rpc,
+    match send_approval_with_deps(
+        &LiveApprovalDeps { chain_rpc: &chain_rpc },
         chain_id,
-        pk,
+        private_key.unwrap(),
         token_addr,
+        spender_addr,
+        "0".to_string(),
         &calldata_hex,
-        "0x0",
-        None,
-        None,
     )
     .await
     {
+        Ok(result) => Ok(crate::output::print_output::<ApprovalResult>(
+            Ok(result),
+            "swap.revoke",
+            output_mode,
+            OutputContext::new(chain_id, false),
+        )),
         Err(e) => Ok(crate::output::print_output::<ApprovalResult>(
             Err(e),
             "swap.revoke",
             output_mode,
             OutputContext::new(chain_id, false),
         )),
-        Ok((_addr, tx_hash)) => {
-            let result = ApprovalResult {
-                token: token_addr.to_string(),
-                spender: spender_addr.to_string(),
-                raw_amount: "0".to_string(),
-                dry_run: false,
-                tx_hash: Some(tx_hash),
-                from_address: Some(from_addr.to_string()),
-            };
-            Ok(crate::output::print_output::<ApprovalResult>(
-                Ok(result),
-                "swap.revoke",
-                output_mode,
-                OutputContext::new(chain_id, false),
-            ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+    use std::cell::RefCell;
+    use uuid::Uuid;
+
+    struct MockQuoteDeps {
+        route_results: RefCell<Vec<Result<Quote>>>,
+        eth_balance: (String, f64),
+        token_balance: (String, u8),
+        allowance: String,
+    }
+
+    impl QuoteDeps for MockQuoteDeps {
+        fn get_route<'a>(
+            &'a self,
+            _req: &'a QuoteRequest,
+            _from_token: &'a TokenRef,
+            _to_token: &'a TokenRef,
+            _user_addr: &'a str,
+            _estimate_gas: bool,
+            _quote_ttl_secs: u64,
+        ) -> BoxFuture<'a, Result<Quote>> {
+            Box::pin(async move { self.route_results.borrow_mut().remove(0) })
         }
+
+        fn get_eth_balance<'a>(
+            &'a self,
+            _wallet_addr: Address,
+        ) -> BoxFuture<'a, Result<(String, f64)>> {
+            let response = self.eth_balance.clone();
+            Box::pin(async move { Ok(response) })
+        }
+
+        fn get_balance<'a>(
+            &'a self,
+            _token_addr: Address,
+            _wallet_addr: Address,
+        ) -> BoxFuture<'a, Result<(String, u8)>> {
+            let response = self.token_balance.clone();
+            Box::pin(async move { Ok(response) })
+        }
+
+        fn get_allowance<'a>(
+            &'a self,
+            _token_addr: Address,
+            _wallet_addr: Address,
+            _spender: Address,
+        ) -> BoxFuture<'a, Result<String>> {
+            let response = self.allowance.clone();
+            Box::pin(async move { Ok(response) })
+        }
+    }
+
+    struct MockExecuteDeps {
+        estimated_gas: Result<u64>,
+        nonce: Result<u64>,
+        send_tx_result: Result<(Address, String)>,
+        receipts: RefCell<Vec<Result<Option<crate::chain::TxStatus>>>>,
+    }
+
+    impl ExecuteDeps for MockExecuteDeps {
+        fn estimate_gas<'a>(
+            &'a self,
+            _from: Address,
+            _to: Address,
+            _data: &'a str,
+            _value: &'a str,
+        ) -> BoxFuture<'a, Result<u64>> {
+            Box::pin(async move {
+                match &self.estimated_gas {
+                    Ok(v) => Ok(*v),
+                    Err(e) => Err(anyhow::anyhow!(e.to_string()).into()),
+                }
+            })
+        }
+
+        fn get_nonce<'a>(&'a self, _address: Address) -> BoxFuture<'a, Result<u64>> {
+            Box::pin(async move {
+                match &self.nonce {
+                    Ok(v) => Ok(*v),
+                    Err(e) => Err(anyhow::anyhow!(e.to_string()).into()),
+                }
+            })
+        }
+
+        fn send_tx<'a>(
+            &'a self,
+            _chain_id: u64,
+            _private_key: &'a str,
+            _to: Address,
+            _data: &'a str,
+            _value_hex: &'a str,
+            _gas_limit: Option<u64>,
+            _max_fee_gwei: Option<f64>,
+        ) -> BoxFuture<'a, Result<(Address, String)>> {
+            Box::pin(async move {
+                match &self.send_tx_result {
+                    Ok(v) => Ok(v.clone()),
+                    Err(e) => Err(anyhow::anyhow!(e.to_string()).into()),
+                }
+            })
+        }
+
+        fn get_tx_receipt<'a>(
+            &'a self,
+            _tx_hash: &'a str,
+        ) -> BoxFuture<'a, Result<Option<crate::chain::TxStatus>>> {
+            Box::pin(async move {
+                match self.receipts.borrow_mut().remove(0) {
+                    Ok(v) => Ok(v),
+                    Err(e) => Err(anyhow::anyhow!(e.to_string()).into()),
+                }
+            })
+        }
+    }
+
+    struct MockApprovalDeps {
+        send_tx_result: Result<(Address, String)>,
+    }
+
+    impl ApprovalDeps for MockApprovalDeps {
+        fn send_tx<'a>(
+            &'a self,
+            _chain_id: u64,
+            _private_key: &'a str,
+            _to: Address,
+            _data: &'a str,
+            _value_hex: &'a str,
+        ) -> BoxFuture<'a, Result<(Address, String)>> {
+            Box::pin(async move {
+                match &self.send_tx_result {
+                    Ok(v) => Ok(v.clone()),
+                    Err(e) => Err(anyhow::anyhow!(e.to_string()).into()),
+                }
+            })
+        }
+    }
+
+    fn test_config(chain_id: u64) -> AppConfig {
+        AppConfig {
+            rpc_url: "https://rpc.example.com".to_string(),
+            chain_id,
+            wallet_address: None,
+            dodo_api_url: "https://api.example.com".to_string(),
+            dodo_api_key: String::new(),
+            dodo_project_id: String::new(),
+            request_timeout_secs: 30,
+            quote_ttl_secs: 300,
+            data_dir: std::env::temp_dir().join(format!("chainpilot_test_{}", Uuid::new_v4())),
+        }
+    }
+
+    fn native_token(chain_id: u64) -> TokenRef {
+        TokenRef {
+            symbol: "ETH".to_string(),
+            address: crate::config::chains::NATIVE_ADDR.to_string(),
+            decimals: 18,
+            chain_id,
+        }
+    }
+
+    fn erc20_token(chain_id: u64) -> TokenRef {
+        TokenRef {
+            symbol: "USDC".to_string(),
+            address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+            decimals: 6,
+            chain_id,
+        }
+    }
+
+    fn quote_request(chain_id: u64, amount: &str) -> QuoteRequest {
+        QuoteRequest {
+            from: native_token(chain_id).address,
+            to: erc20_token(chain_id).address,
+            amount: amount.to_string(),
+            amount_display: amount.parse().unwrap(),
+            chain_id,
+            slippage: 0.5,
+        }
+    }
+
+    fn sample_quote(chain_id: u64) -> Quote {
+        Quote {
+            quote_id: Uuid::new_v4(),
+            created_at: Utc::now(),
+            expires_at: Utc::now() + Duration::minutes(5),
+            from_token: native_token(chain_id),
+            to_token: erc20_token(chain_id),
+            from_amount: "1".to_string(),
+            from_amount_display: 1.0,
+            to_amount: "3000".to_string(),
+            to_amount_display: 3000.0,
+            to_amount_min: "2970".to_string(),
+            price_impact_pct: 0.1,
+            exchange_rate: 3000.0,
+            route_summary: vec![],
+            dex_sources: vec!["DODO".to_string()],
+            route_id: Some("route-1".to_string()),
+            router_to: "0x1111111111111111111111111111111111111111".to_string(),
+            calldata: "0xdeadbeef".to_string(),
+            value: "0".to_string(),
+            gas_limit: Some(200_000),
+            estimated_gas: Some(180_000),
+            estimated_gas_usd: Some(5.0),
+            raw_dodo_response: serde_json::json!({}),
+            chain_id,
+            slippage: 0.5,
+        }
+    }
+
+    fn execute_args() -> ExecuteArgs {
+        ExecuteArgs {
+            quote_id: "quote-1".to_string(),
+            dry_run: false,
+            gas_limit: None,
+            max_fee_gwei: None,
+            wallet: None,
+            private_key: None,
+            wait: false,
+            skip_estimate: false,
+            gas_buffer_pct: None,
+        }
+    }
+
+    fn sample_quote_for_approve(chain_id: u64) -> Quote {
+        let mut quote = sample_quote(chain_id);
+        quote.from_token = erc20_token(chain_id);
+        quote
+    }
+
+    #[tokio::test]
+    async fn fetch_quote_without_wallet_does_not_retry() {
+        let chain_id = 1;
+        let req = quote_request(chain_id, "1");
+        let from_token = native_token(chain_id);
+        let to_token = erc20_token(chain_id);
+        let deps = MockQuoteDeps {
+            route_results: RefCell::new(vec![Err(ChainError::DodoApi {
+                code: 500,
+                message: "upstream".to_string(),
+            })]),
+            eth_balance: ("0".to_string(), 0.0),
+            token_balance: ("0".to_string(), 6),
+            allowance: "0".to_string(),
+        };
+
+        let err = fetch_quote_with_fallback(
+            &deps,
+            &req,
+            &from_token,
+            &to_token,
+            &Address::ZERO.to_string(),
+            &test_config(chain_id),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, ChainError::DodoApi { .. }));
+        assert_eq!(deps.route_results.borrow().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn fetch_quote_native_balance_failures_are_table_driven() {
+        let chain_id = 1;
+        let req = quote_request(chain_id, "1");
+        let to_token = erc20_token(chain_id);
+        let wallet = "0x1111111111111111111111111111111111111111";
+
+        for case in [
+            ("0", "ETH"),
+            ("999999999999999999", "ETH"),
+        ] {
+            let deps = MockQuoteDeps {
+                route_results: RefCell::new(vec![Err(ChainError::DodoApi {
+                    code: 500,
+                    message: "estimate failed".to_string(),
+                })]),
+                eth_balance: (case.0.to_string(), 0.0),
+                token_balance: ("0".to_string(), 6),
+                allowance: "0".to_string(),
+            };
+
+            let err = fetch_quote_with_fallback(
+                &deps,
+                &req,
+                &native_token(chain_id),
+                &to_token,
+                wallet,
+                &test_config(chain_id),
+            )
+            .await
+            .unwrap_err();
+
+            match err {
+                ChainError::InsufficientBalance { token, .. } => assert_eq!(token, case.1),
+                other => panic!("unexpected error: {other}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_quote_erc20_not_approved_after_balance_check() {
+        let chain_id = 1;
+        let from_token = erc20_token(chain_id);
+        let to_token = native_token(chain_id);
+        let req = QuoteRequest {
+            from: from_token.address.clone(),
+            to: to_token.address.clone(),
+            amount: "1".to_string(),
+            amount_display: 1.0,
+            chain_id,
+            slippage: 0.5,
+        };
+        let deps = MockQuoteDeps {
+            route_results: RefCell::new(vec![Err(ChainError::DodoApi {
+                code: 500,
+                message: "estimate failed".to_string(),
+            })]),
+            eth_balance: ("0".to_string(), 0.0),
+            token_balance: ("1000000".to_string(), 6),
+            allowance: "999999".to_string(),
+        };
+
+        let err = fetch_quote_with_fallback(
+            &deps,
+            &req,
+            &from_token,
+            &to_token,
+            "0x1111111111111111111111111111111111111111",
+            &test_config(chain_id),
+        )
+        .await
+        .unwrap_err();
+
+        match err {
+            ChainError::NotApproved { token, .. } => assert_eq!(token, from_token.address),
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_quote_retries_without_estimate_after_checks_pass() {
+        let chain_id = 1;
+        let from_token = erc20_token(chain_id);
+        let to_token = native_token(chain_id);
+        let req = QuoteRequest {
+            from: from_token.address.clone(),
+            to: to_token.address.clone(),
+            amount: "1".to_string(),
+            amount_display: 1.0,
+            chain_id,
+            slippage: 0.5,
+        };
+        let expected = sample_quote(chain_id);
+        let deps = MockQuoteDeps {
+            route_results: RefCell::new(vec![
+                Err(ChainError::DodoApi {
+                    code: 500,
+                    message: "estimate failed".to_string(),
+                }),
+                Ok(expected.clone()),
+            ]),
+            eth_balance: ("0".to_string(), 0.0),
+            token_balance: ("1000000".to_string(), 6),
+            allowance: "1000000".to_string(),
+        };
+
+        let quote = fetch_quote_with_fallback(
+            &deps,
+            &req,
+            &from_token,
+            &to_token,
+            "0x1111111111111111111111111111111111111111",
+            &test_config(chain_id),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(quote.quote_id, expected.quote_id);
+        assert!(deps.route_results.borrow().is_empty());
+    }
+
+    #[test]
+    fn simulation_base_warnings_are_table_driven() {
+        let chain_id = 1;
+        for (estimated_gas, gas_limit, route_summary_len, expected) in [
+            (None, None, 0usize, 2usize),
+            (Some(21000), None, 0usize, 1usize),
+            (None, Some(25000), 1usize, 0usize),
+        ] {
+            let mut quote = sample_quote(chain_id);
+            quote.estimated_gas = estimated_gas;
+            quote.gas_limit = gas_limit;
+            quote.route_summary = (0..route_summary_len)
+                .map(|_| crate::models::quote::RouteHop {
+                    pool_address: "0xpool".to_string(),
+                    dex_name: "DODO".to_string(),
+                    from_token: "USDC".to_string(),
+                    to_token: "ETH".to_string(),
+                    percent: 100.0,
+                })
+                .collect();
+
+            let warnings = simulation_base_warnings(&quote);
+            assert_eq!(warnings.len(), expected, "{warnings:?}");
+        }
+    }
+
+    #[test]
+    fn simulation_gas_cost_eth_handles_missing_and_present_estimates() {
+        assert_eq!(simulation_gas_cost_eth(None, 20.0), 0.0);
+        assert_eq!(simulation_gas_cost_eth(Some(21_000), 20.0), 0.00042);
+    }
+
+    #[test]
+    fn dry_run_from_address_prefers_private_key_then_subcommand_then_global_wallet() {
+        for (derived, subcommand, global, expected) in [
+            (
+                Some("0xpk".to_string()),
+                Some("0xsub".to_string()),
+                Some("0xglobal".to_string()),
+                Some("0xpk".to_string()),
+            ),
+            (
+                None,
+                Some("0xsub".to_string()),
+                Some("0xglobal".to_string()),
+                Some("0xsub".to_string()),
+            ),
+            (
+                None,
+                None,
+                Some("0xglobal".to_string()),
+                Some("0xglobal".to_string()),
+            ),
+            (None, None, None, None),
+        ] {
+            assert_eq!(dry_run_from_address(derived, subcommand, global), expected);
+        }
+    }
+
+    #[test]
+    fn resolve_effective_gas_limit_obeys_precedence_rules() {
+        struct Case {
+            user_gas_limit: Option<u64>,
+            skip_estimate: bool,
+            quote_estimated_gas: Option<u64>,
+            quote_gas_limit: Option<u64>,
+            estimated_gas_from_node: Option<u64>,
+            gas_buffer_pct: Option<u64>,
+            expected: Option<u64>,
+        }
+
+        for case in [
+            Case {
+                user_gas_limit: Some(123_000),
+                skip_estimate: false,
+                quote_estimated_gas: Some(100_000),
+                quote_gas_limit: Some(110_000),
+                estimated_gas_from_node: Some(120_000),
+                gas_buffer_pct: Some(20),
+                expected: Some(123_000),
+            },
+            Case {
+                user_gas_limit: None,
+                skip_estimate: true,
+                quote_estimated_gas: Some(100_000),
+                quote_gas_limit: Some(110_000),
+                estimated_gas_from_node: Some(120_000),
+                gas_buffer_pct: Some(20),
+                expected: Some(100_000),
+            },
+            Case {
+                user_gas_limit: None,
+                skip_estimate: true,
+                quote_estimated_gas: None,
+                quote_gas_limit: Some(110_000),
+                estimated_gas_from_node: Some(120_000),
+                gas_buffer_pct: Some(20),
+                expected: Some(110_000),
+            },
+            Case {
+                user_gas_limit: None,
+                skip_estimate: false,
+                quote_estimated_gas: Some(100_000),
+                quote_gas_limit: Some(110_000),
+                estimated_gas_from_node: Some(120_000),
+                gas_buffer_pct: Some(25),
+                expected: Some(150_000),
+            },
+            Case {
+                user_gas_limit: None,
+                skip_estimate: false,
+                quote_estimated_gas: Some(100_000),
+                quote_gas_limit: Some(110_000),
+                estimated_gas_from_node: None,
+                gas_buffer_pct: Some(25),
+                expected: None,
+            },
+        ] {
+            assert_eq!(
+                resolve_effective_gas_limit(
+                    case.user_gas_limit,
+                    case.skip_estimate,
+                    case.quote_estimated_gas,
+                    case.quote_gas_limit,
+                    case.estimated_gas_from_node,
+                    case.gas_buffer_pct,
+                ),
+                case.expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_quote_returns_no_wallet_when_not_dry_run_and_no_private_key() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let args = execute_args();
+        let err = execute_quote_with_deps(&deps, &args, &test_config(1), &sample_quote(1))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ChainError::NoWallet));
+    }
+
+    #[tokio::test]
+    async fn execute_quote_dry_run_uses_wallet_fallbacks_without_rpc_calls() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.dry_run = true;
+        args.wallet = Some("0x2222222222222222222222222222222222222222".to_string());
+        let result = execute_quote_with_deps(&deps, &args, &test_config(1), &sample_quote(1))
+            .await
+            .unwrap();
+        assert!(matches!(result.status, ExecutionStatus::DryRun));
+        assert_eq!(
+            result.from_address.as_deref(),
+            Some("0x2222222222222222222222222222222222222222")
+        );
+        assert!(result.tx_hash.is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_quote_rejects_invalid_router_before_sending() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.private_key =
+            Some("0x59c6995e998f97a5a0044966f0945382dbf7f50a3f2f72f5f7a0b7d7d4f5e5f1".to_string());
+        let mut quote = sample_quote(1);
+        quote.router_to = "not-an-address".to_string();
+
+        let err = execute_quote_with_deps(&deps, &args, &test_config(1), &quote)
+            .await
+            .unwrap_err();
+        match err {
+            ChainError::InvalidAddress(addr) => assert_eq!(addr, "not-an-address"),
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_quote_submits_transaction_with_estimated_gas() {
+        let signer = "0x59c6995e998f97a5a0044966f0945382dbf7f50a3f2f72f5f7a0b7d7d4f5e5f1";
+        let expected_from = crate::chain::address_from_private_key(signer).unwrap();
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(50_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((expected_from, "0xabc".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.private_key = Some(signer.to_string());
+        args.gas_buffer_pct = Some(20);
+        let result = execute_quote_with_deps(&deps, &args, &test_config(1), &sample_quote(1))
+            .await
+            .unwrap();
+
+        assert!(matches!(result.status, ExecutionStatus::Submitted));
+        assert_eq!(result.tx_hash.as_deref(), Some("0xabc"));
+        let expected_from_str = expected_from.to_string();
+        assert_eq!(result.from_address.as_deref(), Some(expected_from_str.as_str()));
+    }
+
+    #[test]
+    fn resolve_approve_targets_prefers_explicit_values_and_quote_fallbacks() {
+        let quote = sample_quote_for_approve(1);
+        let explicit_token = "0x2222222222222222222222222222222222222222";
+        let explicit_spender = "0x3333333333333333333333333333333333333333";
+
+        let resolved = resolve_approve_targets(Some(explicit_token), Some(&quote), Some(explicit_spender), 1)
+            .unwrap();
+        assert_eq!(resolved, (explicit_token.to_string(), explicit_spender.to_string()));
+
+        let fallback = resolve_approve_targets(None, Some(&quote), None, 1).unwrap();
+        assert_eq!(fallback.0, quote.from_token.address);
+        assert!(fallback.1.starts_with("0x"));
+    }
+
+    #[test]
+    fn resolve_approve_targets_errors_without_required_inputs() {
+        let err = resolve_approve_targets(None, None, None, 1).unwrap_err();
+        assert!(err.to_string().contains("--token or --quote-id"));
+    }
+
+    #[test]
+    fn calldata_builders_encode_expected_selector() {
+        let spender: Address = "0x1111111111111111111111111111111111111111".parse().unwrap();
+        let approve = approve_calldata(spender, alloy::primitives::U256::from(42u64));
+        let revoke = revoke_calldata(spender);
+        assert!(approve.starts_with("0x095ea7b3"));
+        assert!(revoke.starts_with("0x095ea7b3"));
+        assert!(approve.len() > revoke.len() - 1);
+    }
+
+    #[tokio::test]
+    async fn send_approval_with_deps_returns_tx_hash_and_sender() {
+        let signer = "0x59c6995e998f97a5a0044966f0945382dbf7f50a3f2f72f5f7a0b7d7d4f5e5f1";
+        let expected_from = crate::chain::address_from_private_key(signer).unwrap();
+        let deps = MockApprovalDeps {
+            send_tx_result: Ok((expected_from, "0xapprove".to_string())),
+        };
+        let token: Address = "0x2222222222222222222222222222222222222222".parse().unwrap();
+        let spender: Address = "0x3333333333333333333333333333333333333333".parse().unwrap();
+        let result = send_approval_with_deps(
+            &deps,
+            1,
+            signer,
+            token,
+            spender,
+            "1000".to_string(),
+            &approve_calldata(spender, alloy::primitives::U256::from(1000u64)),
+        )
+        .await
+        .unwrap();
+
+        assert!(!result.dry_run);
+        assert_eq!(result.tx_hash.as_deref(), Some("0xapprove"));
+        assert_eq!(result.from_address.as_deref(), Some(expected_from.to_string().as_str()));
     }
 }

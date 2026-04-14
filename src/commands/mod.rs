@@ -177,4 +177,69 @@ mod tests {
         let err = to_raw_amount("0.1234567", 6).unwrap_err();
         assert!(err.to_string().contains("too many decimal places"));
     }
+
+    #[test]
+    fn amount_parsing_cases_are_table_driven() {
+        struct Case<'a> {
+            input: &'a str,
+            decimals: u8,
+            expected_raw: Option<&'a str>,
+            expected_err: Option<&'a str>,
+        }
+
+        for case in [
+            Case {
+                input: "0001.2300",
+                decimals: 6,
+                expected_raw: Some("1230000"),
+                expected_err: None,
+            },
+            Case {
+                input: ".5",
+                decimals: 18,
+                expected_raw: Some("500000000000000000"),
+                expected_err: None,
+            },
+            Case {
+                input: " 42 ",
+                decimals: 0,
+                expected_raw: Some("42"),
+                expected_err: None,
+            },
+            Case {
+                input: "",
+                decimals: 18,
+                expected_raw: None,
+                expected_err: Some("amount cannot be empty"),
+            },
+            Case {
+                input: "-1",
+                decimals: 18,
+                expected_raw: None,
+                expected_err: Some("amount cannot be negative"),
+            },
+            Case {
+                input: "1.2.3",
+                decimals: 18,
+                expected_raw: None,
+                expected_err: Some("Invalid amount"),
+            },
+        ] {
+            let result = to_raw_amount(case.input, case.decimals);
+            match (result, case.expected_raw, case.expected_err) {
+                (Ok(raw), Some(expected), None) => assert_eq!(raw, expected),
+                (Err(err), None, Some(expected)) => {
+                    assert!(err.to_string().contains(expected), "{}", err)
+                }
+                other => panic!("unexpected result shape: {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn parse_display_amount_trims_valid_input_and_rejects_invalid() {
+        assert_eq!(parse_display_amount(" 0.25 ").unwrap(), 0.25);
+        let err = parse_display_amount("abc").unwrap_err();
+        assert!(err.to_string().contains("Invalid amount"));
+    }
 }
