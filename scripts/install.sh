@@ -75,12 +75,28 @@ build_from_source() {
     echo "Installed to ${INSTALL_DIR}/${BIN_NAME}"
 }
 
+get_installed_version() {
+    if [ -x "${INSTALL_DIR}/${BIN_NAME}" ]; then
+        "${INSTALL_DIR}/${BIN_NAME}" --version 2>/dev/null | awk '{print $2}'
+    else
+        echo ""
+    fi
+}
+
 main() {
     local version="${1:-latest}"
     local platform=$(detect_platform)
 
     if [ "$version" = "latest" ]; then
         version=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep -o '"tag_name": "[^"]*' | cut -d'"' -f4 || echo "")
+    fi
+
+    local installed_version
+    installed_version=$(get_installed_version)
+
+    if [ -n "$installed_version" ] && [ -n "$version" ] && [ "$installed_version" = "$version" ]; then
+        echo "${BIN_NAME} ${version} is already up to date."
+        exit 0
     fi
 
     mkdir -p "$INSTALL_DIR"
