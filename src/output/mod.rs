@@ -18,6 +18,18 @@ pub enum OutputMode {
     Quiet,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct OutputContext {
+    pub chain_id: u64,
+    pub dry_run: bool,
+}
+
+impl OutputContext {
+    pub fn new(chain_id: u64, dry_run: bool) -> Self {
+        Self { chain_id, dry_run }
+    }
+}
+
 impl From<&Cli> for OutputMode {
     fn from(cli: &Cli) -> Self {
         if cli.quiet {
@@ -34,10 +46,11 @@ pub fn print_output<T: Serialize + TableRenderable>(
     data: Result<T, ChainError>,
     command: &str,
     mode: OutputMode,
+    context: OutputContext,
 ) -> ExitCode {
     let meta = json::OutputMeta {
-        chain_id: 1,
-        dry_run: false,
+        chain_id: context.chain_id,
+        dry_run: context.dry_run,
         version: env!("CARGO_PKG_VERSION").to_string(),
     };
 

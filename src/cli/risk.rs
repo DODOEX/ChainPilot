@@ -21,16 +21,16 @@ pub enum RiskAction {
 pub struct TokenRiskArgs {
     pub token: String,
 
-    #[arg(long, default_value = "1")]
-    pub chain_id: u64,
+    #[arg(long)]
+    pub chain_id: Option<u64>,
 }
 
 #[derive(Args)]
 pub struct WalletRiskArgs {
     pub address: String,
 
-    #[arg(long, default_value = "1")]
-    pub chain_id: u64,
+    #[arg(long)]
+    pub chain_id: Option<u64>,
 }
 
 #[derive(Args)]
@@ -44,6 +44,6 @@ pub struct ApprovalRiskArgs {
     #[arg(long)]
     pub spender: String,
 
-    #[arg(long, default_value = "1")]
-    pub chain_id: u64,
+    #[arg(long)]
+    pub chain_id: Option<u64>,
 }

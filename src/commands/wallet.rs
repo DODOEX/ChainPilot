@@ -8,7 +8,7 @@ use crate::commands::resolve_token;
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
 use crate::models::wallet::{TokenBalance, WalletBalance};
-use crate::output::{OutputMode, TableRenderable};
+use crate::output::{OutputContext, OutputMode, TableRenderable};
 use crate::store::QuoteStore;
 
 pub async fn handle(
@@ -31,7 +31,8 @@ async fn balance(
     onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    let chain_client = OnChainClient::for_chain(config, args.chain_id).await?;
+    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
     let addr: Address = match args.address.parse() {
         Ok(a) => a,
@@ -40,6 +41,7 @@ async fn balance(
                 Err(ChainError::InvalidAddress(args.address.clone())),
                 "wallet.balance",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -51,6 +53,7 @@ async fn balance(
                 Err(e),
                 "wallet.balance",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -61,7 +64,7 @@ async fn balance(
         for token_input in tokens_str.split(',') {
             let token_ref = match resolve_token(
                 token_input.trim(),
-                args.chain_id,
+                chain_id,
                 onchain,
                 api,
                 config,
@@ -74,6 +77,7 @@ async fn balance(
                         Err(e),
                         "wallet.balance",
                         output_mode,
+                        OutputContext::new(chain_id, false),
                     ));
                 }
             };
@@ -84,6 +88,7 @@ async fn balance(
                         Err(ChainError::InvalidAddress(token_ref.address.clone())),
                         "wallet.balance",
                         output_mode,
+                        OutputContext::new(chain_id, false),
                     ));
                 }
             };
@@ -94,6 +99,7 @@ async fn balance(
                         Err(e),
                         "wallet.balance",
                         output_mode,
+                        OutputContext::new(chain_id, false),
                     ));
                 }
             };
@@ -112,7 +118,7 @@ async fn balance(
 
     let wallet_balance = WalletBalance {
         address: args.address.clone(),
-        chain_id: args.chain_id,
+        chain_id,
         eth_balance: eth_balance_raw,
         eth_balance_display,
         eth_balance_usd: None,
@@ -124,6 +130,7 @@ async fn balance(
         Ok(wallet_balance),
         "wallet.balance",
         output_mode,
+        OutputContext::new(chain_id, false),
     ))
 }
 

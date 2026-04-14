@@ -54,6 +54,7 @@ async fn main() -> Result<ExitCode> {
 
     let output_mode = OutputMode::from(&cli);
     let cli_json = cli.json;
+    let default_chain_id = config.chain_id;
 
     let result = commands::dispatch(cli.command, config, store, api_clients, output_mode).await;
 
@@ -65,7 +66,7 @@ async fn main() -> Result<ExitCode> {
                     "dispatch",
                     &e,
                     output::json::OutputMeta {
-                        chain_id: 1,
+                        chain_id: default_chain_id,
                         dry_run: false,
                         version: env!("CARGO_PKG_VERSION").to_string(),
                     },

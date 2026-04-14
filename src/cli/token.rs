@@ -21,6 +21,6 @@ pub struct TokenIdentArg {
     pub token: String,
 
     /// Chain ID (default: 1)
-    #[arg(long, default_value = "1")]
-    pub chain_id: u64,
+    #[arg(long)]
+    pub chain_id: Option<u64>,
 }

@@ -40,8 +40,8 @@ pub struct QuoteArgs {
     pub amount: f64,
 
     /// Chain ID (default: 1 for Ethereum mainnet)
-    #[arg(long, default_value = "1")]
-    pub chain_id: u64,
+    #[arg(long)]
+    pub chain_id: Option<u64>,
 
     /// Slippage tolerance passed directly to the DODO API (e.g. 0.2)
     #[arg(long, default_value = "0.2")]
@@ -105,8 +105,8 @@ pub struct StatusArgs {
     pub tx_hash: String,
 
     /// Chain ID
-    #[arg(long, default_value = "1")]
-    pub chain_id: u64,
+    #[arg(long)]
+    pub chain_id: Option<u64>,
 }
 
 #[derive(Args)]
@@ -143,8 +143,8 @@ pub struct ApproveArgs {
     pub dry_run: bool,
 
     /// Chain ID
-    #[arg(long, default_value = "1")]
-    pub chain_id: u64,
+    #[arg(long)]
+    pub chain_id: Option<u64>,
 
     /// Private key for signing (required unless --dry-run; env: PRIVATE_KEY)
     #[arg(long, env = "PRIVATE_KEY")]
@@ -167,6 +167,6 @@ pub struct RevokeArgs {
     pub private_key: Option<String>,
 
     /// Chain ID
-    #[arg(long, default_value = "1")]
-    pub chain_id: u64,
+    #[arg(long)]
+    pub chain_id: Option<u64>,
 }

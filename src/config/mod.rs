@@ -103,6 +103,17 @@ impl AppConfig {
         chains::chain_config(self.chain_id)
     }
 
+    /// Resolve the effective chain ID for a command.
+    /// Precedence: CLI `--chain-id` > env/configured `CHAIN_ID` > default mainnet.
+    pub fn effective_chain_id(&self, arg_chain_id: Option<u64>) -> u64 {
+        arg_chain_id.unwrap_or(self.chain_id)
+    }
+
+    /// Resolve the static chain configuration for a command-scoped chain ID.
+    pub fn chain_config_for(&self, arg_chain_id: Option<u64>) -> Option<&'static ChainConfig> {
+        chains::chain_config(self.effective_chain_id(arg_chain_id))
+    }
+
     pub fn quotes_dir(&self) -> PathBuf {
         self.data_dir.join("quotes")
     }
@@ -285,6 +296,22 @@ mod tests {
         with_env(&[("CHAIN_ID", Some("999999"))], || {
             let cfg = AppConfig::load().unwrap();
             assert!(cfg.chain_config().is_none());
+        });
+    }
+
+    #[test]
+    fn effective_chain_id_prefers_cli_arg() {
+        with_env(&[("CHAIN_ID", Some("56"))], || {
+            let cfg = AppConfig::load().unwrap();
+            assert_eq!(cfg.effective_chain_id(Some(8453)), 8453);
+        });
+    }
+
+    #[test]
+    fn effective_chain_id_falls_back_to_config() {
+        with_env(&[("CHAIN_ID", Some("56"))], || {
+            let cfg = AppConfig::load().unwrap();
+            assert_eq!(cfg.effective_chain_id(None), 56);
         });
     }
 }

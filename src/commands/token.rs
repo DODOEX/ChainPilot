@@ -7,7 +7,7 @@ use crate::cli::token::{TokenAction, TokenCmd};
 use crate::commands::resolve_token;
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
-use crate::output::{OutputMode, TableRenderable};
+use crate::output::{OutputContext, OutputMode, TableRenderable};
 use crate::store::QuoteStore;
 
 pub async fn handle(
@@ -20,7 +20,7 @@ pub async fn handle(
 ) -> Result<ExitCode> {
     match cmd.action {
         TokenAction::Info(args) => info(args, api, config, onchain, output_mode).await,
-        TokenAction::Contract(args) => contract(args, onchain, output_mode).await,
+        TokenAction::Contract(args) => contract(args, config, output_mode).await,
     }
 }
 
@@ -31,9 +31,10 @@ async fn info(
     onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    let chain_client = OnChainClient::for_chain(config, args.chain_id).await?;
+    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
-    let token_ref = match resolve_token(&args.token, args.chain_id, onchain, api, config).await {
+    let token_ref = match resolve_token(&args.token, chain_id, onchain, api, config).await {
         Ok(t) => t,
         Err(e) => {
             return Ok(
@@ -41,6 +42,7 @@ async fn info(
                     Err(e),
                     "token.info",
                     output_mode,
+                    OutputContext::new(chain_id, false),
                 ),
             );
         }
@@ -53,6 +55,7 @@ async fn info(
                     Err(ChainError::InvalidAddress(token_ref.address.clone())),
                     "token.info",
                     output_mode,
+                    OutputContext::new(chain_id, false),
                 ),
             );
         }
@@ -65,6 +68,7 @@ async fn info(
                     Err(e),
                     "token.info",
                     output_mode,
+                    OutputContext::new(chain_id, false),
                 ),
             );
         }
@@ -74,15 +78,19 @@ async fn info(
             Ok(info),
             "token.info",
             output_mode,
+            OutputContext::new(chain_id, false),
         ),
     )
 }
 
 async fn contract(
     args: crate::cli::token::TokenIdentArg,
-    onchain: &OnChainClient,
+    config: &AppConfig,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
+    let onchain = &chain_client;
     let addr: Address = match args.token.parse() {
         Ok(a) => a,
         Err(_) => {
@@ -92,6 +100,7 @@ async fn contract(
                 Err(ChainError::InvalidAddress(args.token.clone())),
                 "token.contract",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -108,10 +117,20 @@ async fn contract(
             };
             Ok(crate::output::print_output::<
                 crate::models::token::TokenContract,
-            >(Ok(tc), "token.contract", output_mode))
+            >(
+                Ok(tc),
+                "token.contract",
+                output_mode,
+                OutputContext::new(chain_id, false),
+            ))
         }
         Err(e) => Ok(crate::output::print_output::<
             crate::models::token::TokenContract,
-        >(Err(e), "token.contract", output_mode)),
+        >(
+            Err(e),
+            "token.contract",
+            output_mode,
+            OutputContext::new(chain_id, false),
+        )),
     }
 }

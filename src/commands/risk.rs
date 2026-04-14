@@ -9,7 +9,7 @@ use crate::commands::resolve_token;
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
 use crate::models::risk::{ApprovalRisk, RiskLevel, RiskReport, RiskSignal};
-use crate::output::{OutputMode, TableRenderable};
+use crate::output::{OutputContext, OutputMode, TableRenderable};
 use crate::store::QuoteStore;
 
 pub async fn handle(
@@ -34,15 +34,17 @@ async fn token_risk(
     onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    let chain_client = OnChainClient::for_chain(config, args.chain_id).await?;
+    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
-    let token_ref = match resolve_token(&args.token, args.chain_id, onchain, api, config).await {
+    let token_ref = match resolve_token(&args.token, chain_id, onchain, api, config).await {
         Ok(t) => t,
         Err(e) => {
             return Ok(crate::output::print_output::<RiskReport>(
                 Err(e),
                 "risk.token",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -53,6 +55,7 @@ async fn token_risk(
                 Err(ChainError::InvalidAddress(token_ref.address.clone())),
                 "risk.token",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -63,6 +66,7 @@ async fn token_risk(
                 Err(e),
                 "risk.token",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -109,6 +113,7 @@ async fn token_risk(
         Ok(report),
         "risk.token",
         output_mode,
+        OutputContext::new(chain_id, false),
     ))
 }
 
@@ -118,7 +123,8 @@ async fn wallet_risk(
     onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    let chain_client = OnChainClient::for_chain(config, args.chain_id).await?;
+    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
     let addr: Address = match args.address.parse() {
         Ok(a) => a,
@@ -127,6 +133,7 @@ async fn wallet_risk(
                 Err(ChainError::InvalidAddress(args.address.clone())),
                 "risk.wallet",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -138,6 +145,7 @@ async fn wallet_risk(
                 Err(e),
                 "risk.wallet",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -166,6 +174,7 @@ async fn wallet_risk(
         Ok(report),
         "risk.wallet",
         output_mode,
+        OutputContext::new(chain_id, false),
     ))
 }
 
@@ -176,7 +185,8 @@ async fn approval_risk(
     onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    let chain_client = OnChainClient::for_chain(config, args.chain_id).await?;
+    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
     let owner: Address = match args.address.parse() {
         Ok(a) => a,
@@ -185,6 +195,7 @@ async fn approval_risk(
                 Err(ChainError::InvalidAddress(args.address.clone())),
                 "risk.approval",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -195,17 +206,19 @@ async fn approval_risk(
                 Err(ChainError::InvalidAddress(args.spender.clone())),
                 "risk.approval",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
 
-    let token_ref = match resolve_token(&args.token, args.chain_id, onchain, api, config).await {
+    let token_ref = match resolve_token(&args.token, chain_id, onchain, api, config).await {
         Ok(t) => t,
         Err(e) => {
             return Ok(crate::output::print_output::<ApprovalRisk>(
                 Err(e),
                 "risk.approval",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -217,6 +230,7 @@ async fn approval_risk(
                 Err(ChainError::InvalidAddress(token_ref.address.clone())),
                 "risk.approval",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -228,6 +242,7 @@ async fn approval_risk(
                 Err(e),
                 "risk.approval",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -275,5 +290,6 @@ async fn approval_risk(
         Ok(approval_risk),
         "risk.approval",
         output_mode,
+        OutputContext::new(chain_id, false),
     ))
 }

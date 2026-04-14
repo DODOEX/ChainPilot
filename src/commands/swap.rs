@@ -12,7 +12,7 @@ use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
 use crate::models::quote::QuoteRequest;
 use crate::models::swap::{ExecutionResult, ExecutionStatus, SimulationResult};
-use crate::output::{OutputMode, TableRenderable};
+use crate::output::{OutputContext, OutputMode, TableRenderable};
 use crate::store::QuoteStore;
 
 pub async fn handle(
@@ -45,11 +45,12 @@ async fn quote(
     use crate::chain::{get_allowance, get_balance, get_eth_balance, OnChainClient};
     use alloy::primitives::Address;
 
-    let chain_onchain = OnChainClient::for_chain(config, args.chain_id).await?;
+    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_onchain;
 
-    let from_token = resolve_token(&args.from, args.chain_id, onchain, api, config).await?;
-    let to_token = resolve_token(&args.to, args.chain_id, onchain, api, config).await?;
+    let from_token = resolve_token(&args.from, chain_id, onchain, api, config).await?;
+    let to_token = resolve_token(&args.to, chain_id, onchain, api, config).await?;
     let user_addr = match config.wallet_address.as_deref() {
         Some(addr) => match addr.parse::<Address>() {
             Ok(parsed) => parsed.to_string(),
@@ -62,7 +63,7 @@ async fn quote(
         from: from_token.address.clone(),
         to: to_token.address.clone(),
         amount: args.amount,
-        chain_id: args.chain_id,
+        chain_id,
         slippage: args.slippage,
     };
 
@@ -117,7 +118,7 @@ async fn quote(
                     .into());
                 }
 
-                if let Some(chain_cfg) = config.chain_config() {
+                if let Some(chain_cfg) = config.chain_config_for(Some(chain_id)) {
                     let spender = chain_cfg
                         .contracts
                         .dodo_approve
@@ -162,6 +163,7 @@ async fn quote(
         Ok(quote),
         "swap.quote",
         output_mode,
+        OutputContext::new(chain_id, false),
     ))
 }
 
@@ -182,19 +184,22 @@ async fn simulate(
                 Err(ChainError::QuoteNotFound(args.quote_id)),
                 "swap.simulate",
                 output_mode,
+                OutputContext::new(config.chain_id, false),
             ));
         }
     };
+    let chain_id = quote_data.chain_id;
 
     if Utc::now() > quote_data.expires_at {
         return Ok(crate::output::print_output::<SimulationResult>(
             Err(ChainError::QuoteExpired(args.quote_id)),
             "swap.simulate",
             output_mode,
+            OutputContext::new(chain_id, false),
         ));
     }
 
-    let chain_onchain = OnChainClient::for_chain(config, quote_data.chain_id).await?;
+    let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_onchain;
 
     let mut warnings = Vec::new();
@@ -354,6 +359,7 @@ async fn simulate(
         Ok(result),
         "swap.simulate",
         output_mode,
+        OutputContext::new(chain_id, false),
     ))
 }
 
@@ -377,21 +383,24 @@ async fn execute(
                 Err(ChainError::QuoteNotFound(args.quote_id.clone())),
                 "swap.execute",
                 output_mode,
+                OutputContext::new(config.chain_id, args.dry_run),
             ));
         }
     };
+    let chain_id = quote_data.chain_id;
 
     if Utc::now() > quote_data.expires_at {
         return Ok(crate::output::print_output::<ExecutionResult>(
             Err(ChainError::QuoteExpired(args.quote_id.clone())),
             "swap.execute",
             output_mode,
+            OutputContext::new(chain_id, args.dry_run),
         ));
     }
 
-    let chain_onchain = OnChainClient::for_chain(config, quote_data.chain_id).await?;
+    let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_onchain;
-    let exec_rpc_url = crate::config::chain_config(quote_data.chain_id)
+    let exec_rpc_url = crate::config::chain_config(chain_id)
         .and_then(|c| c.rpc_urls.first().copied())
         .unwrap_or(config.rpc_url.as_str())
         .to_string();
@@ -404,6 +413,7 @@ async fn execute(
             Err(ChainError::NoWallet),
             "swap.execute",
             output_mode,
+            OutputContext::new(chain_id, args.dry_run),
         ));
     }
 
@@ -425,6 +435,7 @@ async fn execute(
                     Err(ChainError::InvalidAddress(quote_data.router_to.clone())),
                     "swap.execute",
                     output_mode,
+                    OutputContext::new(chain_id, args.dry_run),
                 ));
             }
         };
@@ -437,6 +448,7 @@ async fn execute(
                     Err(e),
                     "swap.execute",
                     output_mode,
+                    OutputContext::new(chain_id, args.dry_run),
                 ));
             }
         };
@@ -468,6 +480,7 @@ async fn execute(
                         Err(e),
                         "swap.execute",
                         output_mode,
+                        OutputContext::new(chain_id, args.dry_run),
                     ));
                 }
             }
@@ -493,6 +506,7 @@ async fn execute(
                     Err(e),
                     "swap.execute",
                     output_mode,
+                    OutputContext::new(chain_id, args.dry_run),
                 ));
             }
             Ok((_from_addr, hash)) => {
@@ -588,6 +602,7 @@ async fn execute(
         Ok(result),
         "swap.execute",
         output_mode,
+        OutputContext::new(chain_id, args.dry_run),
     ))
 }
 
@@ -597,26 +612,33 @@ async fn status(
     onchain: &OnChainClient,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    match crate::chain::get_tx_receipt(onchain, &args.tx_hash).await {
-        Ok(Some(status)) => {
-            println!("{:?}", status);
-            Ok(ExitCode::SUCCESS)
-        }
-        Ok(None) => {
-            eprintln!("Transaction not found or pending");
-            Ok(ExitCode::FAILURE)
-        }
+    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
+    match crate::chain::get_tx_receipt(&chain_onchain, &args.tx_hash).await {
+        Ok(Some(status)) => Ok(crate::output::print_output::<crate::chain::TxStatus>(
+            Ok(status),
+            "swap.status",
+            output_mode,
+            OutputContext::new(chain_id, false),
+        )),
+        Ok(None) => Ok(crate::output::print_output::<crate::chain::TxStatus>(
+            Err(ChainError::Config("Transaction not found or pending".to_string())),
+            "swap.status",
+            output_mode,
+            OutputContext::new(chain_id, false),
+        )),
         Err(e) => Ok(crate::output::print_output::<crate::chain::TxStatus>(
             Err(e),
             "swap.status",
             output_mode,
+            OutputContext::new(chain_id, false),
         )),
     }
 }
 
 async fn history(
     args: HistoryArgs,
-    _config: &AppConfig,
+    config: &AppConfig,
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
@@ -634,7 +656,12 @@ async fn history(
     }
     Ok(crate::output::print_output::<
         Vec<crate::models::swap::SwapHistoryRecord>,
-    >(Ok(records), "swap.history", output_mode))
+    >(
+        Ok(records),
+        "swap.history",
+        output_mode,
+        OutputContext::new(config.chain_id, false),
+    ))
 }
 
 async fn approve(
@@ -648,9 +675,10 @@ async fn approve(
     use crate::models::swap::ApprovalResult;
     use alloy::primitives::{Address, U256};
 
-    let chain_client = OnChainClient::for_chain(config, args.chain_id).await?;
+    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
-    let chain_rpc = crate::config::chain_config(args.chain_id)
+    let chain_rpc = crate::config::chain_config(chain_id)
         .and_then(|c| c.rpc_urls.first().copied())
         .unwrap_or(config.rpc_url.as_str())
         .to_string();
@@ -674,12 +702,12 @@ async fn approve(
     let spender_str = if let Some(s) = args.spender.as_deref() {
         s.to_string()
     } else if quote.is_some() {
-        crate::config::chain_config(args.chain_id)
+        crate::config::chain_config(chain_id)
             .map(|c| c.contracts.dodo_approve.to_string())
             .ok_or_else(|| {
                 ChainError::Config(format!(
                     "no chain config for chain_id {}; use --spender to set the approve address",
-                    args.chain_id
+                    chain_id
                 ))
             })?
     } else {
@@ -745,6 +773,7 @@ async fn approve(
             Ok(result),
             "swap.approve",
             output_mode,
+            OutputContext::new(chain_id, true),
         ));
     }
 
@@ -756,13 +785,14 @@ async fn approve(
                 Err(e),
                 "swap.approve",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
 
     match send_tx(
         &chain_rpc,
-        args.chain_id,
+        chain_id,
         pk,
         token_addr,
         &calldata_hex,
@@ -776,6 +806,7 @@ async fn approve(
             Err(e),
             "swap.approve",
             output_mode,
+            OutputContext::new(chain_id, false),
         )),
         Ok((_addr, tx_hash)) => {
             let result = ApprovalResult {
@@ -790,6 +821,7 @@ async fn approve(
                 Ok(result),
                 "swap.approve",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ))
         }
     }
@@ -805,7 +837,8 @@ async fn revoke(
     use crate::models::swap::ApprovalResult;
     use alloy::primitives::Address;
 
-    let chain_rpc = crate::config::chain_config(args.chain_id)
+    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_rpc = crate::config::chain_config(chain_id)
         .and_then(|c| c.rpc_urls.first().copied())
         .unwrap_or(config.rpc_url.as_str())
         .to_string();
@@ -817,6 +850,7 @@ async fn revoke(
                 Err(ChainError::InvalidAddress(args.token.clone())),
                 "swap.revoke",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -827,6 +861,7 @@ async fn revoke(
                 Err(ChainError::InvalidAddress(args.spender.clone())),
                 "swap.revoke",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
@@ -858,6 +893,7 @@ async fn revoke(
             Ok(result),
             "swap.revoke",
             output_mode,
+            OutputContext::new(chain_id, true),
         ));
     }
 
@@ -869,13 +905,14 @@ async fn revoke(
                 Err(e),
                 "swap.revoke",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ));
         }
     };
 
     match send_tx(
         &chain_rpc,
-        args.chain_id,
+        chain_id,
         pk,
         token_addr,
         &calldata_hex,
@@ -889,6 +926,7 @@ async fn revoke(
             Err(e),
             "swap.revoke",
             output_mode,
+            OutputContext::new(chain_id, false),
         )),
         Ok((_addr, tx_hash)) => {
             let result = ApprovalResult {
@@ -903,6 +941,7 @@ async fn revoke(
                 Ok(result),
                 "swap.revoke",
                 output_mode,
+                OutputContext::new(chain_id, false),
             ))
         }
     }
