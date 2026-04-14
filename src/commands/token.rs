@@ -112,29 +112,14 @@ async fn contract(
             ));
         }
     };
-    match crate::chain::get_token_info(onchain, addr).await {
-        Ok(_) => {
-            let tc = crate::models::token::TokenContract {
-                address: token_ref.address,
-                is_proxy: false,
-                proxy_implementation: None,
-                owner: None,
-                deployer: None,
-                deployed_at_block: None,
-                is_verified: None,
-            };
-            Ok(crate::output::print_output::<
-                crate::models::token::TokenContract,
-            >(
-                Ok(tc),
-                "token.contract",
-                output_mode,
-                OutputContext::new(chain_id, false),
-            ))
-        }
-        Err(e) => Ok(crate::output::print_output::<
-            crate::models::token::TokenContract,
-        >(
+    match crate::chain::inspect_token_contract(onchain, addr).await {
+        Ok(contract) => Ok(crate::output::print_output::<crate::models::token::TokenContract>(
+            Ok(contract),
+            "token.contract",
+            output_mode,
+            OutputContext::new(chain_id, false),
+        )),
+        Err(e) => Ok(crate::output::print_output::<crate::models::token::TokenContract>(
             Err(e),
             "token.contract",
             output_mode,

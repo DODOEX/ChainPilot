@@ -3,7 +3,7 @@
 mod erc20;
 mod rpc;
 
-pub use erc20::{get_allowance, get_balance, get_token_info};
+pub use erc20::{get_allowance, get_balance, get_token_info, inspect_token_contract};
 pub use rpc::{
     address_from_private_key, estimate_gas, get_eth_balance, get_gas_price_gwei, get_nonce,
     get_tx_receipt, send_tx, TxStatus,

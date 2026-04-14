@@ -15,6 +15,7 @@ pub struct TokenInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenContract {
     pub address: String,
+    pub chain_id: u64,
     pub is_proxy: bool,
     pub proxy_implementation: Option<String>,
     pub owner: Option<String>,
