@@ -1,5 +1,5 @@
 {
-  "template": "#{{CHANGELOG}}\n\n#{{UNCATEGORIZED}}",
+  "template": "#{{CHANGELOG}}",
   "categories": [
     {
       "title": "## Features",
@@ -12,22 +12,6 @@
     {
       "title": "## Performance",
       "labels": ["perf"]
-    },
-    {
-      "title": "## Refactors",
-      "labels": ["refactor"]
-    },
-    {
-      "title": "## Documentation",
-      "labels": ["docs"]
-    },
-    {
-      "title": "## Tests",
-      "labels": ["test"]
-    },
-    {
-      "title": "## Maintenance",
-      "labels": ["build", "chore", "ci", "revert", "style"]
     }
   ],
   "label_extractor": [
