@@ -11,6 +11,45 @@ cleanup() {
 }
 trap cleanup EXIT
 
+detect_shell_rc() {
+    local shell_name
+    shell_name="$(basename "${SHELL:-}")"
+
+    case "$shell_name" in
+        zsh) echo "${HOME}/.zshrc" ;;
+        bash) echo "${HOME}/.bashrc" ;;
+        *)
+            if [ -f "${HOME}/.zshrc" ]; then
+                echo "${HOME}/.zshrc"
+            else
+                echo "${HOME}/.bashrc"
+            fi
+            ;;
+    esac
+}
+
+ensure_path_in_shell_rc() {
+    local rc_file
+    local path_line='export PATH="${HOME}/.chainpilot/bin:$PATH"'
+
+    rc_file="$(detect_shell_rc)"
+    mkdir -p "$(dirname "$rc_file")"
+    touch "$rc_file"
+
+    if grep -Fqs "$path_line" "$rc_file"; then
+        echo "PATH already configured in ${rc_file}"
+        return 0
+    fi
+
+    {
+        echo ""
+        echo "# Added by ChainPilot installer"
+        echo "$path_line"
+    } >> "$rc_file"
+
+    echo "Added ${INSTALL_DIR} to PATH in ${rc_file}"
+}
+
 detect_platform() {
     local os=$(uname -s | tr '[:upper:]' '[:lower:]')
     local arch=$(uname -m)
@@ -115,9 +154,12 @@ main() {
         build_from_source
     fi
 
+    echo ""
+    ensure_path_in_shell_rc
+
     if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
         echo ""
-        echo "Add to PATH (add to ~/.bashrc or ~/.zshrc to persist):"
+        echo "For the current shell, run:"
         echo "  export PATH=\"\${HOME}/.chainpilot/bin:\$PATH\""
     fi
 }
