@@ -1,6 +1,9 @@
 [package]
 name = "chain-pilot"
 version = "0.1.0-dev.3"
+description = "A CLI tool for on-chain DeFi operations on EVM-compatible networks"
+license = "MIT"
+repository = "https://github.com/DODOEX/ChainPilot"
 edition = "2021"
 
 [[bin]]
