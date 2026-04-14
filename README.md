@@ -1,5 +1,7 @@
 # ChainPilot
 
+English | [中文](README_CN.md)
+
 A command-line tool for on-chain DeFi operations on EVM-compatible networks. Built in Rust using [alloy](https://github.com/alloy-rs/alloy) for RPC interaction and the [DODO](https://dodoex.io) aggregator API for swap routing.
 
 ## Features
@@ -14,6 +16,14 @@ A command-line tool for on-chain DeFi operations on EVM-compatible networks. Bui
 
 ## Installation
 
+**Linux / macOS (recommended):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/DODOEX/ChainPilot/main/chainpilotup/install | bash
+```
+
+This downloads the latest pre-built binary for your platform into `~/.chainpilot/bin` and adds it to your `PATH`.
+
+**Build from source:**
 ```bash
 cargo build --release
 # Binary at: target/release/chainpilot

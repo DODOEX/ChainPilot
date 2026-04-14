@@ -1,5 +1,13 @@
 # AGENT.md
 
+## Skills
+
+The `skills/` directory in the project root contains Claude Code skills for this project. Each subdirectory is a skill that can be loaded via `/user:skill-name` (e.g. `/user:chainpilot`).
+
+Currently available skills:
+- `skills/chainpilot/` — ChainPilot CLI usage and DeFi operation patterns
+- `skills/cast-wallet/` — cast wallet key management patterns
+
 ## Non-Obvious Conventions
 
 **All output must go through `print_output`**: Every command handler uses `crate::output::print_output::<T>(result, "command.subcommand", output_mode)`. Direct `println!` is forbidden — it breaks `--json` mode.
