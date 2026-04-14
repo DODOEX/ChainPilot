@@ -140,6 +140,7 @@ foreach ($entry in $currentPathEntries) {
 
 if (-not $hasCurrentPath) {
     Write-Host ""
+    Write-Host "Open a new PowerShell or Command Prompt window to use chainpilot."
     Write-Host "For the current PowerShell session, run:"
     Write-Host "  `$env:Path = `"$InstallDir;`$env:Path`""
 }
