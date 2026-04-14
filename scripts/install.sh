@@ -55,7 +55,20 @@ build_from_source() {
         exit 1
     fi
 
-    cd "$(dirname "$0")/.."
+    # When run via pipe (curl | bash), BASH_SOURCE[0] is empty or 'bash',
+    # so there is no local source tree to build from.
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd)"
+    local repo_dir="${script_dir}/.."
+
+    if [ ! -f "${repo_dir}/Cargo.toml" ]; then
+        echo "No local source found. Clone the repo and run the script directly:" >&2
+        echo "  git clone https://github.com/${REPO}.git" >&2
+        echo "  cd ChainPilot && bash scripts/install.sh" >&2
+        exit 1
+    fi
+
+    cd "$repo_dir"
     cargo build --release --quiet
     mkdir -p "$INSTALL_DIR"
     cp "target/release/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}"
