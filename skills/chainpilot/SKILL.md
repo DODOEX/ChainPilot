@@ -48,13 +48,15 @@ chainpilot [GLOBAL_FLAGS] <COMMAND> [SUBcommand_FLAGS]
 | `--quiet` | — | off | Suppress all output except errors |
 | `--private-key <hex>` | `PRIVATE_KEY` | — | Signer for write transactions |
 | `--wallet-address <addr>` | `WALLET_ADDRESS` | — | Read-only wallet context |
+| `--rpc-url <url>` | — | Chain's public RPC | Explicit JSON-RPC override |
+| `--chain-id <id>` | `CHAIN_ID` | `1` | Global chain context |
 
 **Context propagation**: Once the user specifies a `--wallet-address` or `--chain-id`,
 carry those values forward to all subsequent commands in the same conversation unless
 the user explicitly asks for a different one.
-| `--rpc-url <url>` | `ETH_RPC_URL` | Chain's public RPC | JSON-RPC endpoint |
-| `--dodo-api-key <key>` | `DODO_API_KEY` | Compiled-in | DODO routing API key |
-| `--dodo-project-id <id>` | `DODO_PROJECT_ID` | Compiled-in | Token list project ID |
+
+Runtime env vars are intentionally limited to `PRIVATE_KEY`, `WALLET_ADDRESS`,
+`CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`, and `DODO_API_URL`.
 
 Config precedence: CLI flag > env var > `.env` file > compile-time default.
 
@@ -77,22 +79,21 @@ This is the recommended end-to-end flow:
 
 ```bash
 # 1. Get a quote (saves locally, returns quote_id)
-QUOTE_ID=$(chainpilot --json swap quote \
+QUOTE_ID=$(chainpilot --json --chain-id 1 swap quote \
   --from ETH --to USDC --amount 0.1 | jq -r .data.quote_id)
 
 # 2. Simulate — read-only pre-flight (balance, allowance, gas, revert risk)
 chainpilot swap simulate --quote-id "$QUOTE_ID" --wallet 0xYourAddress
 
 # 3. Approve token spending if needed (skip for native ETH swaps)
-chainpilot swap approve --quote-id "$QUOTE_ID" --private-key "$PRIVATE_KEY"
+chainpilot --private-key "$PRIVATE_KEY" swap approve --quote-id "$QUOTE_ID"
 
 # 4. Execute and wait for on-chain confirmation
-chainpilot swap execute --quote-id "$QUOTE_ID" \
-  --private-key "$PRIVATE_KEY" --wait
+chainpilot --private-key "$PRIVATE_KEY" swap execute --quote-id "$QUOTE_ID" --wait
 ```
 
 Quotes have a **dual TTL**: the DODO-issued route expires in 20 minutes; the
-local `QUOTE_TTL_SECS` (default 18 min) expires first. Both `simulate` and
+local default TTL is 18 minutes and expires first. Both `simulate` and
 `execute` reject stale quotes.
 
 ---
@@ -102,13 +103,13 @@ local `QUOTE_TTL_SECS` (default 18 min) expires first. Both `simulate` and
 ### `swap quote`
 
 ```bash
-chainpilot swap quote --from <TOKEN> --to <TOKEN> --amount <AMOUNT> \
-  [--chain-id <N>] [--slippage <PCT>]
+chainpilot [--chain-id <N>] swap quote --from <TOKEN> --to <TOKEN> --amount <AMOUNT> \
+  [--slippage <PCT>]
 ```
 
 - `--from` / `--to`: symbol (`ETH`, `USDC`) or `0x` address
 - `--amount`: human-readable amount (e.g. `1.0`, `100`) — **required by CLI** (the CLI has no default; if user omits it, default to `1` yourself)
-- `--chain-id`: chain ID (default: 1)
+- `--chain-id`: global chain ID (default: 1); place it before the subcommand
 - `--slippage`: slippage tolerance in percent (default: 0.2)
 
 Returns a `quote_id` to pass to subsequent commands.
@@ -143,14 +144,13 @@ Approve the DODO router to spend the from-token on your behalf.
 
 ```bash
 # From a saved quote (derives token + spender automatically)
-chainpilot swap approve --quote-id <ID> --private-key 0x...
+chainpilot --private-key 0x... swap approve --quote-id <ID>
 
 # Explicit token, spender, and amount
-chainpilot swap approve --token USDC --spender 0x... --amount 1000 \
-  --private-key 0x...
+chainpilot --private-key 0x... swap approve --token USDC --spender 0x... --amount 1000
 
 # Unlimited approval (omit --amount)
-chainpilot swap approve --token USDC --spender 0x... --private-key 0x...
+chainpilot --private-key 0x... swap approve --token USDC --spender 0x...
 
 # Dry-run (no tx sent, private-key not needed)
 chainpilot swap approve --quote-id <ID> --dry-run
@@ -159,7 +159,7 @@ chainpilot swap approve --quote-id <ID> --dry-run
 ### `swap execute`
 
 ```bash
-chainpilot swap execute --quote-id <ID> --private-key 0x... [OPTIONS]
+chainpilot --private-key 0x... swap execute --quote-id <ID> [OPTIONS]
 ```
 
 | Flag | Description |
@@ -176,7 +176,7 @@ chainpilot swap execute --quote-id <ID> --private-key 0x... [OPTIONS]
 
 ```bash
 chainpilot swap revoke --token <ADDR> --spender <ADDR> [--dry-run]
-chainpilot swap revoke --token USDC --spender 0xRouter --private-key 0x...
+chainpilot --private-key 0x... swap revoke --token USDC --spender 0xRouter
 ```
 
 - `--dry-run`: dry-run mode, private-key not required.
@@ -184,7 +184,7 @@ chainpilot swap revoke --token USDC --spender 0xRouter --private-key 0x...
 ### `swap status`
 
 ```bash
-chainpilot swap status --tx-hash <HASH> [--chain-id <N>]
+chainpilot [--chain-id <N>] swap status --tx-hash <HASH>
 ```
 
 ### `swap history`
@@ -200,7 +200,7 @@ chainpilot swap history [--limit <N>] [--status pending|success|failed]
 ### `token info`
 
 ```bash
-chainpilot token info <TOKEN> [--chain-id <N>]
+chainpilot [--chain-id <N>] token info <TOKEN>
 ```
 
 ERC-20 metadata: name, symbol, decimals, total supply.
@@ -209,7 +209,7 @@ ERC-20 metadata: name, symbol, decimals, total supply.
 ### `token contract`
 
 ```bash
-chainpilot token contract <TOKEN> [--chain-id <N>]
+chainpilot [--chain-id <N>] token contract <TOKEN>
 ```
 
 On-chain contract details: proxy, owner, implementation address.
@@ -221,7 +221,7 @@ On-chain contract details: proxy, owner, implementation address.
 ### `wallet balance`
 
 ```bash
-chainpilot wallet balance <ADDRESS> [--chain-id <N>] [--tokens <ADDR1,ADDR2>]
+chainpilot [--chain-id <N>] wallet balance <ADDRESS> [--tokens <ADDR1,ADDR2>]
 ```
 
 Native + ERC-20 balances for an address.
@@ -233,7 +233,7 @@ Native + ERC-20 balances for an address.
 ### `risk token`
 
 ```bash
-chainpilot risk token <TOKEN> [--chain-id <N>]
+chainpilot [--chain-id <N>] risk token <TOKEN>
 ```
 
 Token risk: honeypot detection, ownership, liquidity flags.
@@ -249,7 +249,7 @@ Wallet risk: exposure summary, high-risk approvals.
 ### `risk approval`
 
 ```bash
-chainpilot risk approval <ADDRESS> --token <TOKEN> --spender <SPENDER> [--chain-id <N>]
+chainpilot [--chain-id <N>] risk approval <ADDRESS> --token <TOKEN> --spender <SPENDER>
 ```
 
 Single approval state.
@@ -289,7 +289,7 @@ Tokens can be a symbol or a `0x` address. Resolution order:
 | Plume | 98866 |
 | Sepolia Testnet | 11155111 |
 
-For unsupported chain IDs, set `ETH_RPC_URL` manually.
+For unsupported chain IDs, pass `--rpc-url` manually.
 
 ---
 
@@ -304,8 +304,7 @@ chainpilot --json swap simulate --quote-id "$QUOTE_ID" \
 chainpilot --json swap quote --from ETH --to USDC --amount 1.0 | jq .
 
 # Quiet execution — only care about the exit code
-chainpilot --quiet swap execute --quote-id "$QUOTE_ID" \
-  --private-key "$PRIVATE_KEY" --wait
+chainpilot --quiet --private-key "$PRIVATE_KEY" swap execute --quote-id "$QUOTE_ID" --wait
 echo $?  # 0 = success
 ```
 

@@ -29,7 +29,7 @@ async fn balance(
     config: &AppConfig,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
     let addr: Address = match args.address.parse() {

@@ -51,22 +51,19 @@ DODO_PROJECT_ID=your-id
 
 ## 配置
 
-所有配置项均可通过环境变量、`.env` 文件或 CLI 标志提供，优先级依次为：CLI 标志 > 运行时环境变量 > `.env` 文件 > 编译时默认值 > 硬编码默认值。
+环境变量刻意收敛为少数几个。运行时只读取 `PRIVATE_KEY`、`WALLET_ADDRESS`、`CHAIN_ID`、`DODO_API_KEY`、`DODO_PROJECT_ID`、`DODO_API_URL`；有对应 CLI 标志的情况下，CLI 仍然优先。
 
 | 变量名                 | CLI 标志              | 默认值                       | 说明                               |
 |------------------------|-----------------------|------------------------------|------------------------------------|
 | `PRIVATE_KEY`          | `--private-key`       | —                            | 用于签署交易的私钥                 |
 | `WALLET_ADDRESS`       | `--wallet-address`    | —                            | 余额查询 / 模拟时使用的钱包地址    |
-| `ETH_RPC_URL`          | `--rpc-url`           | 链内置公共 RPC               | JSON-RPC 端点                      |
+| `--rpc-url`            | 仅 CLI                | 链内置公共 RPC               | 显式覆盖 JSON-RPC 端点             |
 | `CHAIN_ID`             | `--chain-id`          | `1`（以太坊主网）            | 当前链 ID                          |
-| `DODO_API_KEY`         | `--dodo-api-key`      | 编译时内嵌默认值             | DODO 路由 API Key                  |
-| `DODO_PROJECT_ID`      | `--dodo-project-id`   | 编译时内嵌默认值             | DODO 项目 ID，用于代币列表查询     |
+| `DODO_API_KEY`         | —                     | 编译时内嵌默认值             | DODO 路由 API Key                  |
+| `DODO_PROJECT_ID`      | —                     | 编译时内嵌默认值             | DODO 项目 ID，用于代币列表查询     |
 | `DODO_API_URL`         | —                     | DODO 生产端点                | 覆盖路由 API 地址                  |
-| `CHAIN_DATA_DIR`       | —                     | 系统数据目录（`chain/`）     | 报价和历史记录存储目录             |
-| `REQUEST_TIMEOUT_SECS` | —                     | `30`                         | HTTP 请求超时（秒）                |
-| `QUOTE_TTL_SECS`       | —                     | `1080`                       | 本地报价有效期（秒）               |
 
-全局标志（`--json`、`--quiet`、`--private-key`、`--wallet-address`、`--rpc-url`、`--dodo-api-key`、`--dodo-project-id`）适用于所有子命令，需放在子命令名称之前：
+全局标志（`--json`、`--quiet`、`--private-key`、`--wallet-address`、`--rpc-url`、`--chain-id`）适用于所有子命令，需放在子命令名称之前：
 
 ```bash
 chainpilot --json --chain-id 42161 swap quote --from ETH --to USDC --amount 1.0
@@ -109,7 +106,7 @@ RUST_LOG=debug chainpilot ...
 | Plume               | 98866      |
 | Sepolia Testnet     | 11155111   |
 
-不在列表中的链，请手动设置 `ETH_RPC_URL`。
+不在列表中的链，请手动传入 `--rpc-url`。
 
 ## 典型兑换流程
 
@@ -129,7 +126,7 @@ chainpilot swap approve --quote-id "$QUOTE_ID" --private-key "$PRIVATE_KEY"
 chainpilot swap execute --quote-id "$QUOTE_ID" --private-key "$PRIVATE_KEY" --wait
 ```
 
-报价的本地有效期为 `QUOTE_TTL_SECS`（默认 18 分钟），DODO 签发的路由本身有 20 分钟截止时间。`simulate` 和 `execute` 均会拒绝已过期的报价。
+报价的本地有效期默认是 18 分钟，DODO 签发的路由本身有 20 分钟截止时间。`simulate` 和 `execute` 均会拒绝已过期的报价。
 
 ## 使用说明
 
@@ -141,7 +138,7 @@ chainpilot swap execute --quote-id "$QUOTE_ID" --private-key "$PRIVATE_KEY" --wa
 chainpilot swap quote --from ETH --to USDC --amount 1.0
 
 # Arbitrum 上自定义滑点
-chainpilot swap quote --from ETH --to USDC --amount 1.0 --chain-id 42161 --slippage 0.5
+chainpilot --chain-id 42161 swap quote --from ETH --to USDC --amount 1.0 --slippage 0.5
 ```
 
 报价会保存在本地，通过 `quote_id` 标识，后续传给 `simulate`、`approve`、`execute`。
@@ -187,7 +184,7 @@ chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --skip-estimat
 **查询交易状态：**
 ```bash
 chainpilot swap status --tx-hash 0x...
-chainpilot swap status --tx-hash 0x... --chain-id 42161
+chainpilot --chain-id 42161 swap status --tx-hash 0x...
 ```
 
 **查看兑换历史：**
@@ -230,7 +227,7 @@ chainpilot token info 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 
 # 链上合约详情：代理、所有者、实现地址
 chainpilot token contract USDC
-chainpilot token contract USDC --chain-id 137
+chainpilot --chain-id 137 token contract USDC
 ```
 
 ### Wallet（钱包）
@@ -238,7 +235,7 @@ chainpilot token contract USDC --chain-id 137
 ```bash
 # 原生代币和 ERC-20 余额
 chainpilot wallet balance 0xYourAddress
-chainpilot wallet balance 0xYourAddress --chain-id 56
+chainpilot --chain-id 56 wallet balance 0xYourAddress
 
 # 仅查询指定代币余额
 chainpilot wallet balance 0xYourAddress --tokens 0xToken1,0xToken2
@@ -249,7 +246,7 @@ chainpilot wallet balance 0xYourAddress --tokens 0xToken1,0xToken2
 ```bash
 # 代币风险分析（貔貅检测、所有权、流动性）
 chainpilot risk token USDC
-chainpilot risk token 0xSomeAddress --chain-id 1
+chainpilot --chain-id 1 risk token 0xSomeAddress
 
 # 钱包风险概览（敞口、高风险授权）
 chainpilot risk wallet 0xYourAddress

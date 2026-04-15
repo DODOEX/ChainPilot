@@ -244,7 +244,7 @@ async fn quote(
     api: &ApiClients,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_id = config.chain_id;
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_onchain;
 
@@ -297,7 +297,7 @@ async fn fetch_quote_with_fallback<D: QuoteDeps>(
             to_token,
             user_addr,
             estimate_gas,
-            config.quote_ttl_secs,
+            crate::config::DEFAULT_QUOTE_TTL_SECS,
         )
         .await
     {
@@ -339,7 +339,7 @@ async fn fetch_quote_with_fallback<D: QuoteDeps>(
                     .into());
                 }
 
-                if let Some(chain_cfg) = config.chain_config_for(Some(req.chain_id)) {
+                if let Some(chain_cfg) = config.chain_config_for(req.chain_id) {
                     let spender = chain_cfg
                         .contracts
                         .dodo_approve
@@ -366,7 +366,7 @@ async fn fetch_quote_with_fallback<D: QuoteDeps>(
                     to_token,
                     user_addr,
                     false,
-                    config.quote_ttl_secs,
+                    crate::config::DEFAULT_QUOTE_TTL_SECS,
                 )
                 .await
             {
@@ -705,10 +705,7 @@ async fn execute(
     let chain_id = quote_data.chain_id;
 
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
-    let exec_rpc_url = crate::config::chain_config(chain_id)
-        .and_then(|c| c.rpc_urls.first().copied())
-        .unwrap_or(config.rpc_url.as_str())
-        .to_string();
+    let exec_rpc_url = config.rpc_url_for_chain(chain_id);
     let deps = LiveExecuteDeps {
         onchain: &chain_onchain,
         exec_rpc_url: &exec_rpc_url,
@@ -753,7 +750,7 @@ async fn execute_quote_with_deps<D: ExecuteDeps>(
     use alloy::primitives::Address;
     use std::time::Duration;
 
-    let private_key = args.private_key.as_deref();
+    let private_key = config.private_key.as_deref();
 
     if !args.dry_run && private_key.is_none() {
         return Err(ChainError::NoWallet);
@@ -875,7 +872,7 @@ async fn status(
     config: &AppConfig,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    let chain_id = config.effective_chain_id(args.chain_id);
+    let chain_id = config.chain_id;
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     match crate::chain::get_tx_receipt(&chain_onchain, &args.tx_hash).await {
         Ok(Some(status)) => Ok(crate::output::print_output::<crate::chain::TxStatus>(
@@ -937,19 +934,16 @@ async fn approve(
     use crate::models::swap::ApprovalResult;
     use alloy::primitives::{Address, U256};
 
-    let chain_id = config.effective_chain_id(args.chain_id);
-    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
-    let onchain = &chain_client;
-    let chain_rpc = crate::config::chain_config(chain_id)
-        .and_then(|c| c.rpc_urls.first().copied())
-        .unwrap_or(config.rpc_url.as_str())
-        .to_string();
-
     // Load quote if provided; used as fallback for token and spender.
     let quote = match &args.quote_id {
         Some(id) => store.load_quote(id)?,
         None => None,
     };
+
+    let chain_id = quote.as_ref().map(|q| q.chain_id).unwrap_or(config.chain_id);
+    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
+    let onchain = &chain_client;
+    let chain_rpc = config.rpc_url_for_chain(chain_id);
 
     let (token_str, spender_str) = resolve_approve_targets(
         args.token.as_deref(),
@@ -994,7 +988,7 @@ async fn approve(
     //   arg[1]    = amount as 32-byte big-endian
     let calldata_hex = approve_calldata(spender_addr, amount_u256);
 
-    let private_key = args.private_key.as_deref();
+    let private_key = config.private_key.as_deref();
 
     if args.dry_run || private_key.is_none() {
         let result = ApprovalResult {
@@ -1050,11 +1044,8 @@ async fn revoke(
     use crate::models::swap::ApprovalResult;
     use alloy::primitives::Address;
 
-    let chain_id = config.effective_chain_id(args.chain_id);
-    let chain_rpc = crate::config::chain_config(chain_id)
-        .and_then(|c| c.rpc_urls.first().copied())
-        .unwrap_or(config.rpc_url.as_str())
-        .to_string();
+    let chain_id = config.chain_id;
+    let chain_rpc = config.rpc_url_for_chain(chain_id);
 
     let token_addr: Address = match args.token.parse() {
         Ok(a) => a,
@@ -1082,7 +1073,7 @@ async fn revoke(
     // approve(address,uint256) with amount 0 revokes ERC-20 allowance.
     let calldata_hex = revoke_calldata(spender_addr);
 
-    let private_key = args.private_key.as_deref();
+    let private_key = config.private_key.as_deref();
 
     if args.dry_run || private_key.is_none() {
         let result = ApprovalResult {
@@ -1272,13 +1263,13 @@ mod tests {
     fn test_config(chain_id: u64) -> AppConfig {
         AppConfig {
             rpc_url: "https://rpc.example.com".to_string(),
+            rpc_url_overridden: false,
             chain_id,
+            private_key: None,
             wallet_address: None,
             dodo_api_url: "https://api.example.com".to_string(),
             dodo_api_key: String::new(),
             dodo_project_id: String::new(),
-            request_timeout_secs: 30,
-            quote_ttl_secs: 300,
             data_dir: std::env::temp_dir().join(format!("chainpilot_test_{}", Uuid::new_v4())),
         }
     }
@@ -1348,7 +1339,6 @@ mod tests {
             gas_limit: None,
             max_fee_gwei: None,
             wallet: None,
-            private_key: None,
             wait: false,
             skip_estimate: false,
             gas_buffer_pct: None,
@@ -1690,13 +1680,14 @@ mod tests {
             send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
             receipts: RefCell::new(vec![]),
         };
-        let mut args = execute_args();
-        args.private_key =
+        let args = execute_args();
+        let mut config = test_config(1);
+        config.private_key =
             Some("0x59c6995e998f97a5a0044966f0945382dbf7f50a3f2f72f5f7a0b7d7d4f5e5f1".to_string());
         let mut quote = sample_quote(1);
         quote.router_to = "not-an-address".to_string();
 
-        let err = execute_quote_with_deps(&deps, &args, &test_config(1), &quote)
+        let err = execute_quote_with_deps(&deps, &args, &config, &quote)
             .await
             .unwrap_err();
         match err {
@@ -1716,9 +1707,10 @@ mod tests {
             receipts: RefCell::new(vec![]),
         };
         let mut args = execute_args();
-        args.private_key = Some(signer.to_string());
+        let mut config = test_config(1);
+        config.private_key = Some(signer.to_string());
         args.gas_buffer_pct = Some(20);
-        let result = execute_quote_with_deps(&deps, &args, &test_config(1), &sample_quote(1))
+        let result = execute_quote_with_deps(&deps, &args, &config, &sample_quote(1))
             .await
             .unwrap();
 
@@ -1747,6 +1739,20 @@ mod tests {
     fn resolve_approve_targets_errors_without_required_inputs() {
         let err = resolve_approve_targets(None, None, None, 1).unwrap_err();
         assert!(err.to_string().contains("--token or --quote-id"));
+    }
+
+    #[test]
+    fn approve_uses_quote_chain_id_when_present() {
+        let mut config = test_config(1);
+        config.chain_id = 1;
+
+        let quote = sample_quote_for_approve(42161);
+        let effective_chain_id = quote.chain_id;
+
+        let resolved = resolve_approve_targets(None, Some(&quote), None, effective_chain_id).unwrap();
+        assert_eq!(effective_chain_id, 42161);
+        assert_eq!(resolved.0, quote.from_token.address);
+        assert!(resolved.1.starts_with("0x"));
     }
 
     #[test]

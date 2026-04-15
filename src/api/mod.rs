@@ -23,7 +23,9 @@ impl ApiClients {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(config.request_timeout_secs))
+            .timeout(std::time::Duration::from_secs(
+                crate::config::DEFAULT_REQUEST_TIMEOUT_SECS,
+            ))
             .default_headers(headers)
             .build()?;
 

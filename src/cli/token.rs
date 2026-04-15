@@ -19,8 +19,4 @@ pub enum TokenAction {
 pub struct TokenIdentArg {
     /// Token symbol or contract address
     pub token: String,
-
-    /// Chain ID (default: 1)
-    #[arg(long)]
-    pub chain_id: Option<u64>,
 }

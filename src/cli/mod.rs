@@ -30,16 +30,12 @@ pub struct Cli {
     pub wallet_address: Option<String>,
 
     /// Ethereum RPC endpoint
-    #[arg(long, env = "ETH_RPC_URL", global = true)]
+    #[arg(long, global = true)]
     pub rpc_url: Option<String>,
 
-    /// DODO API key (overrides DODO_API_KEY env var and compile-time default)
-    #[arg(long, env = "DODO_API_KEY", global = true, hide_env_values = true)]
-    pub dodo_api_key: Option<String>,
-
-    /// DODO project ID for tokenlist lookup (overrides DODO_PROJECT_ID env var and compile-time default)
-    #[arg(long, env = "DODO_PROJECT_ID", global = true, hide_env_values = true)]
-    pub dodo_project_id: Option<String>,
+    /// Active chain ID
+    #[arg(long, env = "CHAIN_ID", global = true)]
+    pub chain_id: Option<u64>,
 
     #[command(subcommand)]
     pub command: Commands,

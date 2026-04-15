@@ -11,14 +11,14 @@ const FALLBACK_RPC_URL: &str = "https://ethereum-rpc.publicnode.com";
 pub const DEFAULT_DODO_API_URL: &str = "https://api.dodoex.io/route-service/v2/widget/getdodoroute";
 
 /// Compile-time default: set `DODO_API_KEY` at build time to bake a key into the binary.
-/// Runtime `DODO_API_KEY` env var or `--dodo-api-key` CLI arg takes precedence.
+/// Runtime `DODO_API_KEY` env var takes precedence.
 pub const DEFAULT_DODO_API_KEY: &str = match option_env!("DODO_API_KEY") {
     Some(v) => v,
     None => "",
 };
 
 /// Compile-time default: set `DODO_PROJECT_ID` at build time to bake a project ID into the binary.
-/// Runtime `DODO_PROJECT_ID` env var or `--dodo-project-id` CLI arg takes precedence.
+/// Runtime `DODO_PROJECT_ID` env var takes precedence.
 pub const DEFAULT_DODO_PROJECT_ID: &str = match option_env!("DODO_PROJECT_ID") {
     Some(v) => v,
     None => "",
@@ -30,15 +30,15 @@ pub const DEFAULT_QUOTE_TTL_SECS: u64 = 1080;
 #[derive(Debug, Clone)]
 pub struct AppConfig {
     pub rpc_url: String,
+    pub rpc_url_overridden: bool,
     pub chain_id: u64,
+    pub private_key: Option<String>,
     pub wallet_address: Option<String>,
     pub dodo_api_url: String,
     pub dodo_api_key: String,
     /// Project ID for the DODO tokenlist API (`/config-center/user/tokenlist/v2`).
     /// Set via `DODO_PROJECT_ID`. Without this, tokenlist lookup is skipped.
     pub dodo_project_id: String,
-    pub request_timeout_secs: u64,
-    pub quote_ttl_secs: u64,
     pub data_dir: PathBuf,
 }
 
@@ -49,22 +49,20 @@ impl AppConfig {
             .parse()
             .unwrap_or(DEFAULT_CHAIN_ID);
 
-        let rpc_url = std::env::var("ETH_RPC_URL").unwrap_or_else(|_| {
+        let rpc_url_overridden = false;
+        let rpc_url = {
             chains::chain_config(chain_id)
                 .and_then(|c| c.rpc_urls.first().copied())
                 .unwrap_or(FALLBACK_RPC_URL)
                 .to_string()
-        });
+        };
 
+        let private_key = std::env::var("PRIVATE_KEY").ok();
         let wallet_address = std::env::var("WALLET_ADDRESS").ok();
 
-        let data_dir = std::env::var("CHAIN_DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                dirs::data_local_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("chain")
-            });
+        let data_dir = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("chain");
 
         let dodo_api_url =
             std::env::var("DODO_API_URL").unwrap_or_else(|_| DEFAULT_DODO_API_URL.to_string());
@@ -75,25 +73,15 @@ impl AppConfig {
         let dodo_project_id = std::env::var("DODO_PROJECT_ID")
             .unwrap_or_else(|_| DEFAULT_DODO_PROJECT_ID.to_string());
 
-        let request_timeout_secs = std::env::var("REQUEST_TIMEOUT_SECS")
-            .unwrap_or_else(|_| DEFAULT_REQUEST_TIMEOUT_SECS.to_string())
-            .parse()
-            .unwrap_or(DEFAULT_REQUEST_TIMEOUT_SECS);
-
-        let quote_ttl_secs = std::env::var("QUOTE_TTL_SECS")
-            .unwrap_or_else(|_| DEFAULT_QUOTE_TTL_SECS.to_string())
-            .parse()
-            .unwrap_or(DEFAULT_QUOTE_TTL_SECS);
-
         Ok(Self {
             rpc_url,
+            rpc_url_overridden,
             chain_id,
+            private_key,
             wallet_address,
             dodo_api_url,
             dodo_api_key,
             dodo_project_id,
-            request_timeout_secs,
-            quote_ttl_secs,
             data_dir,
         })
     }
@@ -104,15 +92,22 @@ impl AppConfig {
         chains::chain_config(self.chain_id)
     }
 
-    /// Resolve the effective chain ID for a command.
-    /// Precedence: CLI `--chain-id` > env/configured `CHAIN_ID` > default mainnet.
-    pub fn effective_chain_id(&self, arg_chain_id: Option<u64>) -> u64 {
-        arg_chain_id.unwrap_or(self.chain_id)
+    /// Resolve the static chain configuration for a specific chain ID.
+    pub fn chain_config_for(&self, chain_id: u64) -> Option<&'static ChainConfig> {
+        chains::chain_config(chain_id)
     }
 
-    /// Resolve the static chain configuration for a command-scoped chain ID.
-    pub fn chain_config_for(&self, arg_chain_id: Option<u64>) -> Option<&'static ChainConfig> {
-        chains::chain_config(self.effective_chain_id(arg_chain_id))
+    /// Resolve the RPC URL for a target chain.
+    /// Precedence: explicit CLI/env override > chain default RPC > configured fallback RPC.
+    pub fn rpc_url_for_chain(&self, chain_id: u64) -> String {
+        if self.rpc_url_overridden || chain_id == self.chain_id {
+            return self.rpc_url.clone();
+        }
+
+        chains::chain_config(chain_id)
+            .and_then(|c| c.rpc_urls.first().copied())
+            .unwrap_or(self.rpc_url.as_str())
+            .to_string()
     }
 
     pub fn quotes_dir(&self) -> PathBuf {
@@ -169,16 +164,10 @@ mod tests {
 
     #[test]
     fn chain_id_read_from_env() {
-        with_env(
-            &[
-                ("CHAIN_ID", Some("56")),
-                ("ETH_RPC_URL", Some("https://bsc-rpc.example.com")),
-            ],
-            || {
-                let cfg = AppConfig::load().unwrap();
-                assert_eq!(cfg.chain_id, 56);
-            },
-        );
+        with_env(&[("CHAIN_ID", Some("56"))], || {
+            let cfg = AppConfig::load().unwrap();
+            assert_eq!(cfg.chain_id, 56);
+        });
     }
 
     #[test]
@@ -186,15 +175,6 @@ mod tests {
         with_env(&[("CHAIN_ID", Some("not_a_number"))], || {
             let cfg = AppConfig::load().unwrap();
             assert_eq!(cfg.chain_id, DEFAULT_CHAIN_ID);
-        });
-    }
-
-    #[test]
-    fn rpc_url_read_from_env() {
-        let custom = "https://my-node.example.com";
-        with_env(&[("ETH_RPC_URL", Some(custom))], || {
-            let cfg = AppConfig::load().unwrap();
-            assert_eq!(cfg.rpc_url, custom);
         });
     }
 
@@ -208,37 +188,55 @@ mod tests {
     }
 
     #[test]
-    fn rpc_url_falls_back_to_chain_config() {
-        with_env(&[("ETH_RPC_URL", None), ("CHAIN_ID", Some("1"))], || {
+    fn rpc_url_defaults_to_chain_config() {
+        with_env(&[("CHAIN_ID", Some("1"))], || {
             let cfg = AppConfig::load().unwrap();
             assert!(cfg.rpc_url.starts_with("https://"));
+            assert!(!cfg.rpc_url_overridden);
         });
     }
 
     #[test]
     fn rpc_url_falls_back_to_hardcoded_for_unknown_chain() {
-        with_env(
-            &[("ETH_RPC_URL", None), ("CHAIN_ID", Some("999999"))],
-            || {
-                let cfg = AppConfig::load().unwrap();
-                assert_eq!(cfg.rpc_url, FALLBACK_RPC_URL);
-            },
-        );
+        with_env(&[("CHAIN_ID", Some("999999"))], || {
+            let cfg = AppConfig::load().unwrap();
+            assert_eq!(cfg.rpc_url, FALLBACK_RPC_URL);
+        });
     }
 
     #[test]
-    fn invalid_timeout_falls_back_to_default() {
-        with_env(
-            &[
-                ("REQUEST_TIMEOUT_SECS", Some("bad")),
-                ("QUOTE_TTL_SECS", Some("also_bad")),
-            ],
-            || {
-                let cfg = AppConfig::load().unwrap();
-                assert_eq!(cfg.request_timeout_secs, DEFAULT_REQUEST_TIMEOUT_SECS);
-                assert_eq!(cfg.quote_ttl_secs, DEFAULT_QUOTE_TTL_SECS);
-            },
-        );
+    fn private_key_read_from_env() {
+        let private_key = "0xabc123";
+        with_env(&[("PRIVATE_KEY", Some(private_key))], || {
+            let cfg = AppConfig::load().unwrap();
+            assert_eq!(cfg.private_key.as_deref(), Some(private_key));
+        });
+    }
+
+    #[test]
+    fn rpc_url_for_chain_prefers_explicit_override() {
+        with_env(&[("CHAIN_ID", Some("1"))], || {
+            let mut cfg = AppConfig::load().unwrap();
+            cfg.rpc_url = "https://override.example.com".to_string();
+            cfg.rpc_url_overridden = true;
+            assert_eq!(cfg.rpc_url_for_chain(8453), "https://override.example.com");
+        });
+    }
+
+    #[test]
+    fn rpc_url_for_chain_uses_target_chain_default_without_override() {
+        with_env(&[("CHAIN_ID", Some("1"))], || {
+            let cfg = AppConfig::load().unwrap();
+            assert_eq!(cfg.rpc_url_for_chain(8453), "https://mainnet.base.org");
+        });
+    }
+
+    #[test]
+    fn timeout_and_ttl_use_defaults() {
+        with_env(&[], || {
+            assert_eq!(DEFAULT_REQUEST_TIMEOUT_SECS, 30);
+            assert_eq!(DEFAULT_QUOTE_TTL_SECS, 1080);
+        });
     }
 
     #[test]
@@ -259,22 +257,12 @@ mod tests {
     }
 
     #[test]
-    fn data_dir_read_from_env() {
-        with_env(&[("CHAIN_DATA_DIR", Some("/tmp/chain_test_cfg"))], || {
+    fn data_dir_defaults_to_local_chain_dir() {
+        with_env(&[], || {
             let cfg = AppConfig::load().unwrap();
-            assert_eq!(cfg.data_dir, PathBuf::from("/tmp/chain_test_cfg"));
-            assert_eq!(
-                cfg.quotes_dir(),
-                PathBuf::from("/tmp/chain_test_cfg/quotes")
-            );
-            assert_eq!(
-                cfg.history_dir(),
-                PathBuf::from("/tmp/chain_test_cfg/history")
-            );
-            assert_eq!(
-                cfg.tokenlist_cache_path(),
-                PathBuf::from("/tmp/chain_test_cfg/tokenlist_cache.json")
-            );
+            assert!(cfg.quotes_dir().ends_with("chain/quotes"));
+            assert!(cfg.history_dir().ends_with("chain/history"));
+            assert!(cfg.tokenlist_cache_path().ends_with("chain/tokenlist_cache.json"));
         });
     }
 
@@ -296,18 +284,11 @@ mod tests {
     }
 
     #[test]
-    fn effective_chain_id_prefers_cli_arg() {
+    fn chain_config_for_returns_requested_chain() {
         with_env(&[("CHAIN_ID", Some("56"))], || {
             let cfg = AppConfig::load().unwrap();
-            assert_eq!(cfg.effective_chain_id(Some(8453)), 8453);
-        });
-    }
-
-    #[test]
-    fn effective_chain_id_falls_back_to_config() {
-        with_env(&[("CHAIN_ID", Some("56"))], || {
-            let cfg = AppConfig::load().unwrap();
-            assert_eq!(cfg.effective_chain_id(None), 56);
+            let cc = cfg.chain_config_for(8453).unwrap();
+            assert_eq!(cc.chain_id, 8453);
         });
     }
 }

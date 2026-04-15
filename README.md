@@ -51,22 +51,19 @@ DODO_PROJECT_ID=your-id
 
 ## Configuration
 
-All settings can be supplied as environment variables, a `.env` file, or CLI flags. CLI flags take highest precedence.
+Supported environment variables are intentionally limited. Runtime config is read only from `PRIVATE_KEY`, `WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`, and `DODO_API_URL`. CLI flags still override where available.
 
 | Variable               | CLI flag              | Default                        | Description                                    |
 |------------------------|-----------------------|--------------------------------|------------------------------------------------|
 | `PRIVATE_KEY`          | `--private-key`       | —                              | Private key for signing transactions           |
 | `WALLET_ADDRESS`       | `--wallet-address`    | —                              | Wallet address for balance/simulate context    |
-| `ETH_RPC_URL`          | `--rpc-url`           | Chain's built-in public RPC    | JSON-RPC endpoint                              |
+| `--rpc-url`            | CLI only              | Chain's built-in public RPC    | Explicit JSON-RPC override                     |
 | `CHAIN_ID`             | `--chain-id`          | `1` (Ethereum mainnet)         | Active chain ID                                |
-| `DODO_API_KEY`         | `--dodo-api-key`      | Compiled-in default            | DODO routing API key                           |
-| `DODO_PROJECT_ID`      | `--dodo-project-id`   | Compiled-in default            | DODO project ID for token list lookup          |
+| `DODO_API_KEY`         | —                     | Compiled-in default            | DODO routing API key                           |
+| `DODO_PROJECT_ID`      | —                     | Compiled-in default            | DODO project ID for token list lookup          |
 | `DODO_API_URL`         | —                     | DODO production endpoint       | Override routing API URL                       |
-| `CHAIN_DATA_DIR`       | —                     | OS data dir (`chain/`)         | Directory for quotes and history               |
-| `REQUEST_TIMEOUT_SECS` | —                     | `30`                           | HTTP request timeout                           |
-| `QUOTE_TTL_SECS`       | —                     | `1080`                         | How long a saved quote stays valid (seconds)   |
 
-Global flags (`--json`, `--quiet`, `--private-key`, `--wallet-address`, `--rpc-url`, `--dodo-api-key`, `--dodo-project-id`) apply to every subcommand and must appear before the subcommand name:
+Global flags (`--json`, `--quiet`, `--private-key`, `--wallet-address`, `--rpc-url`, `--chain-id`) apply to every subcommand and must appear before the subcommand name:
 
 ```bash
 chainpilot --json --chain-id 42161 swap quote --from ETH --to USDC --amount 1.0
@@ -109,7 +106,7 @@ Tokens can be specified as a symbol (`ETH`, `USDC`) or a `0x` contract address. 
 | Plume              | 98866      |
 | Sepolia Testnet    | 11155111   |
 
-For unsupported chain IDs, set `ETH_RPC_URL` manually.
+For unsupported chain IDs, pass `--rpc-url` manually.
 
 ## Typical Swap Workflow
 
@@ -129,7 +126,7 @@ chainpilot swap approve --quote-id "$QUOTE_ID" --private-key "$PRIVATE_KEY"
 chainpilot swap execute --quote-id "$QUOTE_ID" --private-key "$PRIVATE_KEY" --wait
 ```
 
-Quotes expire after `QUOTE_TTL_SECS` (default 18 minutes) locally, and the DODO-issued route carries its own 20-minute deadline. Both `simulate` and `execute` reject expired quotes.
+Quotes expire after the local default TTL of 18 minutes, and the DODO-issued route carries its own 20-minute deadline. Both `simulate` and `execute` reject expired quotes.
 
 ## Usage
 
@@ -141,7 +138,7 @@ Quotes expire after `QUOTE_TTL_SECS` (default 18 minutes) locally, and the DODO-
 chainpilot swap quote --from ETH --to USDC --amount 1.0
 
 # Quote on Arbitrum with custom slippage tolerance
-chainpilot swap quote --from ETH --to USDC --amount 1.0 --chain-id 42161 --slippage 0.5
+chainpilot --chain-id 42161 swap quote --from ETH --to USDC --amount 1.0 --slippage 0.5
 ```
 
 The quote is saved locally and identified by a `quote_id`. Pass this ID to `simulate`, `approve`, and `execute`.
@@ -187,7 +184,7 @@ chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --skip-estimat
 **Check transaction status:**
 ```bash
 chainpilot swap status --tx-hash 0x...
-chainpilot swap status --tx-hash 0x... --chain-id 42161
+chainpilot --chain-id 42161 swap status --tx-hash 0x...
 ```
 
 **View swap history:**
@@ -230,7 +227,7 @@ chainpilot token info 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 
 # On-chain contract details: proxy, owner, implementation
 chainpilot token contract USDC
-chainpilot token contract USDC --chain-id 137
+chainpilot --chain-id 137 token contract USDC
 ```
 
 ### Wallet
@@ -238,7 +235,7 @@ chainpilot token contract USDC --chain-id 137
 ```bash
 # Native and ERC-20 balances
 chainpilot wallet balance 0xYourAddress
-chainpilot wallet balance 0xYourAddress --chain-id 56
+chainpilot --chain-id 56 wallet balance 0xYourAddress
 
 # Check balances for specific tokens only
 chainpilot wallet balance 0xYourAddress --tokens 0xToken1,0xToken2
@@ -249,7 +246,7 @@ chainpilot wallet balance 0xYourAddress --tokens 0xToken1,0xToken2
 ```bash
 # Token risk analysis (honeypot detection, ownership, liquidity)
 chainpilot risk token USDC
-chainpilot risk token 0xSomeAddress --chain-id 1
+chainpilot --chain-id 1 risk token 0xSomeAddress
 
 # Wallet risk overview (exposure, high-risk approvals)
 chainpilot risk wallet 0xYourAddress

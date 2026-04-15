@@ -39,10 +39,6 @@ pub struct QuoteArgs {
     #[arg(long)]
     pub amount: String,
 
-    /// Chain ID (default: 1 for Ethereum mainnet)
-    #[arg(long)]
-    pub chain_id: Option<u64>,
-
     /// Slippage tolerance passed directly to the DODO API (e.g. 0.2)
     #[arg(long, default_value = "0.2")]
     pub slippage: f64,
@@ -81,10 +77,6 @@ pub struct ExecuteArgs {
     #[arg(long, env = "WALLET_ADDRESS")]
     pub wallet: Option<String>,
 
-    /// Private key for signing and broadcasting the transaction (required unless --dry-run; env: PRIVATE_KEY)
-    #[arg(long, env = "PRIVATE_KEY")]
-    pub private_key: Option<String>,
-
     /// Wait for the transaction to be mined and show the final on-chain status
     #[arg(long)]
     pub wait: bool,
@@ -103,10 +95,6 @@ pub struct StatusArgs {
     /// Transaction hash to check
     #[arg(long)]
     pub tx_hash: String,
-
-    /// Chain ID
-    #[arg(long)]
-    pub chain_id: Option<u64>,
 }
 
 #[derive(Args)]
@@ -142,13 +130,6 @@ pub struct ApproveArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Chain ID
-    #[arg(long)]
-    pub chain_id: Option<u64>,
-
-    /// Private key for signing (required unless --dry-run; env: PRIVATE_KEY)
-    #[arg(long, env = "PRIVATE_KEY")]
-    pub private_key: Option<String>,
 }
 
 #[derive(Args)]
@@ -162,11 +143,4 @@ pub struct RevokeArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Private key for signing (required unless --dry-run; env: PRIVATE_KEY)
-    #[arg(long, env = "PRIVATE_KEY")]
-    pub private_key: Option<String>,
-
-    /// Chain ID
-    #[arg(long)]
-    pub chain_id: Option<u64>,
 }

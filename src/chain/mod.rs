@@ -40,10 +40,7 @@ impl OnChainClient {
         if chain_id == config.chain_id {
             return Self::new(config).await;
         }
-        let rpc_url = crate::config::chain_config(chain_id)
-            .and_then(|c| c.rpc_urls.first().copied())
-            .unwrap_or(config.rpc_url.as_str())
-            .to_string();
+        let rpc_url = config.rpc_url_for_chain(chain_id);
         let mut cfg = config.clone();
         cfg.rpc_url = rpc_url;
         cfg.chain_id = chain_id;

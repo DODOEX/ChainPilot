@@ -129,13 +129,13 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("chain_test_{}", Uuid::new_v4()));
         let config = AppConfig {
             rpc_url: "https://test.example.com".to_string(),
+            rpc_url_overridden: false,
             chain_id: 1,
+            private_key: None,
             wallet_address: None,
             dodo_api_url: String::new(),
             dodo_api_key: String::new(),
             dodo_project_id: String::new(),
-            request_timeout_secs: 30,
-            quote_ttl_secs: 300,
             data_dir: dir.clone(),
         };
         let store = QuoteStore::new(&config).expect("create store");

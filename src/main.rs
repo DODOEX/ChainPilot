@@ -33,16 +33,20 @@ async fn main() -> Result<ExitCode> {
     let mut config = AppConfig::load()?;
 
     // CLI args take highest precedence (above runtime env vars and compile-time defaults).
-    if let Some(key) = cli.dodo_api_key.clone() {
-        config.dodo_api_key = key;
+    if let Some(rpc_url) = cli.rpc_url.clone() {
+        config.rpc_url = rpc_url;
+        config.rpc_url_overridden = true;
     }
-    if let Some(project_id) = cli.dodo_project_id.clone() {
-        config.dodo_project_id = project_id;
+    if let Some(chain_id) = cli.chain_id {
+        config.chain_id = chain_id;
+    }
+    if let Some(private_key) = cli.private_key.clone() {
+        config.private_key = Some(private_key);
     }
     if let Some(wallet_address) = cli.wallet_address.clone() {
         config.wallet_address = Some(wallet_address);
     } else if config.wallet_address.is_none() {
-        config.wallet_address = cli
+        config.wallet_address = config
             .private_key
             .as_deref()
             .and_then(|pk| address_from_private_key(pk).ok())
