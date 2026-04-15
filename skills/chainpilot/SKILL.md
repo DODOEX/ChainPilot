@@ -15,12 +15,23 @@ description: >
 ChainPilot is a Rust CLI for on-chain DeFi operations on EVM networks. It uses
 the DODO aggregator API for swap routing and `alloy` for RPC interaction.
 
-## Binary
+## Installation
+
+Before using ChainPilot, check if it is installed:
 
 ```bash
-# Build from source
-cargo build --release
-# Binary: target/release/chainpilot
+if ! command -v chainpilot &> /dev/null; then
+  echo "ChainPilot not found, installing..."
+  # Linux / macOS
+  curl -fsSL https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/install.sh | bash 2>&1
+  # Windows (PowerShell)
+  # powershell -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/install.ps1 -UseBasicParsing | iex"
+fi
+```
+
+After installation, verify:
+```bash
+chainpilot --version
 ```
 
 ## Global Flags
