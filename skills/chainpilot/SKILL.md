@@ -39,17 +39,16 @@ chainpilot --version
 These must appear **before** the subcommand:
 
 ```bash
-chainpilot [GLOBAL_FLAGS] <subcommand> [SUBCOMMAND_FLAGS]
+chainpilot [GLOBAL_FLAGS] <COMMAND> [SUBcommand_FLAGS]
 ```
 
 | Flag | Env var | Default | Notes |
 |---|---|---|---|
 | `--json` | — | off | Structured JSON output for scripting |
 | `--quiet` | — | off | Suppress all output except errors |
-| `--chain-id <N>` | `CHAIN_ID` | `1` (mainnet) | Active chain |
-| `--rpc-url <url>` | `ETH_RPC_URL` | Chain's public RPC | JSON-RPC endpoint |
 | `--private-key <hex>` | `PRIVATE_KEY` | — | Signer for write transactions |
 | `--wallet-address <addr>` | `WALLET_ADDRESS` | — | Read-only wallet context |
+| `--rpc-url <url>` | `ETH_RPC_URL` | Chain's public RPC | JSON-RPC endpoint |
 | `--dodo-api-key <key>` | `DODO_API_KEY` | Compiled-in | DODO routing API key |
 | `--dodo-project-id <id>` | `DODO_PROJECT_ID` | Compiled-in | Token list project ID |
 
@@ -99,13 +98,14 @@ local `QUOTE_TTL_SECS` (default 18 min) expires first. Both `simulate` and
 ### `swap quote`
 
 ```bash
-chainpilot swap quote --from <TOKEN> --to <TOKEN> [--amount <AMOUNT>] \
+chainpilot swap quote --from <TOKEN> --to <TOKEN> --amount <AMOUNT> \
   [--chain-id <N>] [--slippage <PCT>]
 ```
 
 - `--from` / `--to`: symbol (`ETH`, `USDC`) or `0x` address
-- `--amount`: human-readable amount (e.g. `1.0`, `100`). **Default: `1`** if omitted.
-- `--slippage`: slippage tolerance in percent (e.g. `0.5`)
+- `--amount`: human-readable amount (e.g. `1.0`, `100`) — **required by CLI** (the CLI has no default; if user omits it, default to `1` yourself)
+- `--chain-id`: chain ID (default: 1)
+- `--slippage`: slippage tolerance in percent (default: 0.2)
 
 Returns a `quote_id` to pass to subsequent commands.
 
@@ -131,6 +131,8 @@ without spending gas.
 chainpilot swap simulate --quote-id <ID> --wallet <ADDR>
 ```
 
+- `--wallet`: wallet address for balance/allowance checks (not `--wallet-address`)
+
 ### `swap approve`
 
 Approve the DODO router to spend the from-token on your behalf.
@@ -146,7 +148,7 @@ chainpilot swap approve --token USDC --spender 0x... --amount 1000 \
 # Unlimited approval (omit --amount)
 chainpilot swap approve --token USDC --spender 0x... --private-key 0x...
 
-# Dry-run (no tx sent)
+# Dry-run (no tx sent, private-key not needed)
 chainpilot swap approve --quote-id <ID> --dry-run
 ```
 
@@ -158,74 +160,95 @@ chainpilot swap execute --quote-id <ID> --private-key 0x... [OPTIONS]
 
 | Flag | Description |
 |---|---|
-| `--dry-run` | Build + simulate the tx, no broadcast; use `--wallet` instead of key |
+| `--dry-run` | Simulate execution without broadcasting — use `--wallet` instead of `--private-key` |
+| `--wallet <ADDR>` | Wallet address for dry-run (not `--wallet-address`) |
 | `--wait` | Block until mined, print final on-chain status |
 | `--gas-limit <N>` | Hard-override gas limit |
 | `--max-fee-gwei <N>` | Override EIP-1559 max fee (in gwei) |
 | `--gas-buffer-pct <N>` | Add N% buffer on top of `eth_estimateGas` |
-| `--skip-estimate` | Skip `eth_estimateGas`, use quote's estimate directly |
+| `--skip-estimate` | Skip `eth_estimateGas`, use quote's gas estimate directly |
 
 ### `swap revoke`
 
 ```bash
-chainpilot swap revoke --token <ADDR> --spender <ADDR> --private-key 0x...
-chainpilot swap revoke --token <ADDR> --spender <ADDR> --dry-run
+chainpilot swap revoke --token <ADDR> --spender <ADDR> [--dry-run]
+chainpilot swap revoke --token USDC --spender 0xRouter --private-key 0x...
 ```
+
+- `--dry-run`: dry-run mode, private-key not required.
 
 ### `swap status`
 
 ```bash
-chainpilot swap status --tx-hash 0x... [--chain-id <N>]
+chainpilot swap status --tx-hash <HASH> [--chain-id <N>]
 ```
 
 ### `swap history`
 
 ```bash
-chainpilot swap history [--limit <N>] [--status pending|confirmed|failed]
+chainpilot swap history [--limit <N>] [--status pending|success|failed]
 ```
 
 ---
 
 ## `token` Subcommands
 
-```bash
-# ERC-20 metadata: name, symbol, decimals, total supply
-chainpilot token info USDC
-chainpilot token info 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+### `token info`
 
-# On-chain contract details: proxy, owner, implementation address
-chainpilot token contract USDC
-chainpilot token contract USDC --chain-id 137
+```bash
+chainpilot token info <TOKEN> [--chain-id <N>]
 ```
+
+ERC-20 metadata: name, symbol, decimals, total supply.
+`<TOKEN>` can be a symbol (`USDC`) or contract address (`0x...`).
+
+### `token contract`
+
+```bash
+chainpilot token contract <TOKEN> [--chain-id <N>]
+```
+
+On-chain contract details: proxy, owner, implementation address.
 
 ---
 
 ## `wallet` Subcommands
 
-```bash
-# Native + ERC-20 balances for an address
-chainpilot wallet balance 0xYourAddress
-chainpilot wallet balance 0xYourAddress --chain-id 56
+### `wallet balance`
 
-# Filter to specific tokens only
-chainpilot wallet balance 0xYourAddress --tokens 0xToken1,0xToken2
+```bash
+chainpilot wallet balance <ADDRESS> [--chain-id <N>] [--tokens <ADDR1,ADDR2>]
 ```
+
+Native + ERC-20 balances for an address.
 
 ---
 
 ## `risk` Subcommands
 
+### `risk token`
+
 ```bash
-# Token risk: honeypot detection, ownership, liquidity flags
-chainpilot risk token USDC
-chainpilot risk token 0xSomeAddress --chain-id 1
-
-# Wallet risk: exposure summary, high-risk approvals
-chainpilot risk wallet 0xYourAddress
-
-# Single approval state
-chainpilot risk approval 0xYourAddress --token USDC --spender 0xSpenderAddr
+chainpilot risk token <TOKEN> [--chain-id <N>]
 ```
+
+Token risk: honeypot detection, ownership, liquidity flags.
+
+### `risk wallet`
+
+```bash
+chainpilot risk wallet <ADDRESS>
+```
+
+Wallet risk: exposure summary, high-risk approvals.
+
+### `risk approval`
+
+```bash
+chainpilot risk approval <ADDRESS> --token <TOKEN> --spender <SPENDER> [--chain-id <N>]
+```
+
+Single approval state.
 
 ---
 
