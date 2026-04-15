@@ -46,7 +46,7 @@ chainpilot [GLOBAL_FLAGS] <COMMAND> [SUBcommand_FLAGS]
 |---|---|---|---|
 | `--json` | — | off | Structured JSON output for scripting |
 | `--quiet` | — | off | Suppress all output except errors |
-| `--private-key <hex>` | `PRIVATE_KEY` | — | Signer for write transactions |
+| private-key flag | `PRIVATE_KEY` | — | Supported by the CLI for signer input; prefer keystore or env-configured signer context in generated commands |
 | `--keystore-path <path>` | `KEYSTORE_PATH` | — | Encrypted JSON keystore for write transactions |
 | `--password-file <path>` | `KEYSTORE_PASSWORD_FILE` | — | Read keystore password from file |
 | `--password-env <NAME>` | `KEYSTORE_PASSWORD_ENV` | — | Read keystore password from the named env var |
@@ -57,6 +57,15 @@ chainpilot [GLOBAL_FLAGS] <COMMAND> [SUBcommand_FLAGS]
 **Context propagation**: Once the user specifies a `--wallet-address` or `--chain-id`,
 carry those values forward to all subsequent commands in the same conversation unless
 the user explicitly asks for a different one.
+
+## Credential Safety
+
+- Never ask the user to paste a raw private key, API key, mnemonic, or keystore password into chat.
+- Never include a real secret value in a generated command, example, log snippet, or echoed output.
+- When a signer is needed, prefer `--keystore-path` plus interactive password prompt, `--password-env <NAME>`, or an already-set environment variable such as `PRIVATE_KEY`.
+- Avoid generating commands that pass secrets via CLI flags when an env var or keystore-based alternative exists. In particular, do not suggest `--private-key <secret>` in normal responses.
+- If a command must reference a secret-backed env var, mention only the variable name, for example `PRIVATE_KEY` or `DODO_API_KEY`, and do not expand it in the response.
+- If the user already shared a secret in chat, do not repeat it; instruct them to rotate it if exposure risk is material.
 
 Runtime env vars are intentionally limited to `PRIVATE_KEY`, `KEYSTORE_PATH`,
 `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`,
@@ -156,25 +165,26 @@ Approve the DODO router to spend the from-token on your behalf.
 
 ```bash
 # From a saved quote (derives token + spender automatically)
-chainpilot --private-key 0x... swap approve --quote-id <ID>
-
-# Same flow with a keystore signer
 chainpilot --keystore-path /path/to/keystore.json swap approve --quote-id <ID>
 
+# Same flow when a signer is already configured via environment
+chainpilot swap approve --quote-id <ID>
+
 # Explicit token, spender, and amount
-chainpilot --private-key 0x... swap approve --token USDC --spender 0x... --amount 1000
+chainpilot --keystore-path /path/to/keystore.json swap approve --token USDC --spender 0x... --amount 1000
 
-# Unlimited approval (omit --amount)
-chainpilot --private-key 0x... swap approve --token USDC --spender 0x...
+# Unlimited approval (omit --amount), using the configured signer context
+chainpilot swap approve --token USDC --spender 0x...
 
-# Dry-run (no tx sent, private-key not needed)
+# Dry-run (no tx sent, signer not needed)
 chainpilot swap approve --quote-id <ID> --dry-run
 ```
 
 ### `swap execute`
 
 ```bash
-chainpilot --private-key 0x... swap execute --quote-id <ID> [OPTIONS]
+# Uses the configured signer context from the environment
+chainpilot swap execute --quote-id <ID> [OPTIONS]
 
 # Keystore signer; prompts for password if needed
 chainpilot --keystore-path /path/to/keystore.json swap execute --quote-id <ID> [OPTIONS]
@@ -186,7 +196,7 @@ chainpilot --keystore-path /path/to/keystore.json --password-file /path/to/keyst
 
 | Flag | Description |
 |---|---|
-| `--dry-run` | Simulate execution without broadcasting — use `--wallet` instead of `--private-key` |
+| `--dry-run` | Simulate execution without broadcasting — use `--wallet` instead of a signer |
 | `--wallet <ADDR>` | Wallet address for dry-run (not `--wallet-address`) |
 | `--wait` | Block until mined, print final on-chain status |
 | `--gas-limit <N>` | Hard-override gas limit |
@@ -198,11 +208,11 @@ chainpilot --keystore-path /path/to/keystore.json --password-file /path/to/keyst
 
 ```bash
 chainpilot swap revoke --token <ADDR> --spender <ADDR> [--dry-run]
-chainpilot --private-key 0x... swap revoke --token USDC --spender 0xRouter
+chainpilot swap revoke --token USDC --spender 0xRouter
 chainpilot --keystore-path /path/to/keystore.json swap revoke --token USDC --spender 0xRouter
 ```
 
-- `--dry-run`: dry-run mode, private-key not required.
+- `--dry-run`: dry-run mode, signer not required.
 
 ### `swap status`
 
@@ -326,8 +336,7 @@ chainpilot --json swap simulate --quote-id "$QUOTE_ID" \
 # Full quote payload
 chainpilot --json swap quote --from ETH --to USDC --amount 1.0 | jq .
 
-# Quiet execution — only care about the exit code
-chainpilot --quiet --private-key "$PRIVATE_KEY" swap execute --quote-id "$QUOTE_ID" --wait
+# Quiet execution with a keystore signer — only care about the exit code
 chainpilot --quiet --keystore-path /path/to/keystore.json swap execute --quote-id "$QUOTE_ID" --wait
 echo $?  # 0 = success
 ```
