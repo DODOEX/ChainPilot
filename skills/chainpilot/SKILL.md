@@ -48,6 +48,10 @@ chainpilot [GLOBAL_FLAGS] <COMMAND> [SUBcommand_FLAGS]
 | `--quiet` | — | off | Suppress all output except errors |
 | `--private-key <hex>` | `PRIVATE_KEY` | — | Signer for write transactions |
 | `--wallet-address <addr>` | `WALLET_ADDRESS` | — | Read-only wallet context |
+
+**Context propagation**: Once the user specifies a `--wallet-address` or `--chain-id`,
+carry those values forward to all subsequent commands in the same conversation unless
+the user explicitly asks for a different one.
 | `--rpc-url <url>` | `ETH_RPC_URL` | Chain's public RPC | JSON-RPC endpoint |
 | `--dodo-api-key <key>` | `DODO_API_KEY` | Compiled-in | DODO routing API key |
 | `--dodo-project-id <id>` | `DODO_PROJECT_ID` | Compiled-in | Token list project ID |
