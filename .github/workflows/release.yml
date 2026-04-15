@@ -109,6 +109,8 @@ jobs:
       - name: Build release binary
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          DODO_API_KEY: ${{ secrets.DODO_API_KEY }}
+          DODO_PROJECT_ID: ${{ secrets.DODO_PROJECT_ID }}
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package Unix artifact
