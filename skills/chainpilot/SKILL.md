@@ -99,15 +99,28 @@ local `QUOTE_TTL_SECS` (default 18 min) expires first. Both `simulate` and
 ### `swap quote`
 
 ```bash
-chainpilot swap quote --from <TOKEN> --to <TOKEN> --amount <AMOUNT> \
+chainpilot swap quote --from <TOKEN> --to <TOKEN> [--amount <AMOUNT>] \
   [--chain-id <N>] [--slippage <PCT>]
 ```
 
 - `--from` / `--to`: symbol (`ETH`, `USDC`) or `0x` address
-- `--amount`: human-readable (e.g. `1.0`, `100`)
+- `--amount`: human-readable amount (e.g. `1.0`, `100`). **Default: `1`** if omitted.
 - `--slippage`: slippage tolerance in percent (e.g. `0.5`)
 
 Returns a `quote_id` to pass to subsequent commands.
+
+**Token not found handling**: If `chainpilot swap quote` returns an error indicating
+the token symbol was not found, use the Coingecko API to search for the token's
+contract address on the target chain:
+
+```bash
+# Search token address via Coingecko
+curl -s "https://api.coingecko.com/api/v3/search?query=<SYMBOL>" | jq '.coins[] | select(.symbol == "<SYMBOL_LOWER>") | {name, id, platforms}'
+```
+
+Then show the found address (filtered by target chain, e.g. `ethereum`, `polygon`,
+`arbitrum`, `base`, `bnb`) to the user and ask for confirmation before retrying
+with the address.
 
 ### `swap simulate`
 
