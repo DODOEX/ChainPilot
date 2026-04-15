@@ -51,11 +51,15 @@ DODO_PROJECT_ID=your-id
 
 ## Configuration
 
-Supported environment variables are intentionally limited. Runtime config is read only from `PRIVATE_KEY`, `WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`, and `DODO_API_URL`. CLI flags still override where available.
+Supported environment variables are intentionally limited. Runtime config is read only from `PRIVATE_KEY`, `KEYSTORE_PATH`, `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`, `WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`, and `DODO_API_URL`. CLI flags still override where available.
 
 | Variable               | CLI flag              | Default                        | Description                                    |
 |------------------------|-----------------------|--------------------------------|------------------------------------------------|
 | `PRIVATE_KEY`          | `--private-key`       | —                              | Private key for signing transactions           |
+| `KEYSTORE_PATH`        | `--keystore-path`     | —                              | Encrypted JSON keystore for signing            |
+| `KEYSTORE_PASSWORD_FILE` | `--password-file`   | —                              | Read keystore password from file               |
+| `KEYSTORE_PASSWORD_ENV` | `--password-env`     | —                              | Read keystore password from named env var      |
+| `KEYSTORE_PASSWORD`    | —                     | —                              | Default env var used for keystore password     |
 | `WALLET_ADDRESS`       | `--wallet-address`    | —                              | Wallet address for balance/simulate context    |
 | `--rpc-url`            | CLI only              | Chain's built-in public RPC    | Explicit JSON-RPC override                     |
 | `CHAIN_ID`             | `--chain-id`          | `1` (Ethereum mainnet)         | Active chain ID                                |
@@ -63,7 +67,7 @@ Supported environment variables are intentionally limited. Runtime config is rea
 | `DODO_PROJECT_ID`      | —                     | Compiled-in default            | DODO project ID for token list lookup          |
 | `DODO_API_URL`         | —                     | DODO production endpoint       | Override routing API URL                       |
 
-Global flags (`--json`, `--quiet`, `--private-key`, `--wallet-address`, `--rpc-url`, `--chain-id`) apply to every subcommand and must appear before the subcommand name:
+Global flags (`--json`, `--quiet`, `--private-key`, `--keystore-path`, `--password-file`, `--password-env`, `--wallet-address`, `--rpc-url`, `--chain-id`) apply to every subcommand and must appear before the subcommand name:
 
 ```bash
 chainpilot --json --chain-id 42161 swap quote --from ETH --to USDC --amount 1.0
@@ -74,6 +78,13 @@ Enable debug logging:
 ```bash
 RUST_LOG=debug chainpilot ...
 ```
+
+If `--keystore-path` is set, password resolution order is:
+
+1. `--password-file`
+2. `--password-env <NAME>`
+3. `KEYSTORE_PASSWORD`
+4. Interactive prompt when running in a TTY
 
 ## Token Resolution
 
@@ -120,10 +131,10 @@ QUOTE_ID=$(chainpilot --json swap quote --from ETH --to USDC --amount 0.1 | jq -
 chainpilot swap simulate --quote-id "$QUOTE_ID" --wallet 0xYourAddress
 
 # 3. Approve token spending if needed (skip for native ETH swaps)
-chainpilot swap approve --quote-id "$QUOTE_ID" --private-key "$PRIVATE_KEY"
+chainpilot --keystore-path ~/.chainpilot/main.json swap approve --quote-id "$QUOTE_ID"
 
 # 4. Execute and wait for confirmation
-chainpilot swap execute --quote-id "$QUOTE_ID" --private-key "$PRIVATE_KEY" --wait
+chainpilot --keystore-path ~/.chainpilot/main.json swap execute --quote-id "$QUOTE_ID" --wait
 ```
 
 Quotes expire after the local default TTL of 18 minutes, and the DODO-issued route carries its own 20-minute deadline. Both `simulate` and `execute` reject expired quotes.
@@ -156,11 +167,15 @@ Simulation is read-only — it costs no gas and does not broadcast any transacti
 # Dry-run: build and simulate the transaction without broadcasting
 chainpilot swap execute --quote-id <QUOTE_ID> --dry-run --wallet 0xYourAddress
 
-# Live execution (PRIVATE_KEY required)
+# Live execution with a raw private key
 chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x...
 
-# Wait for the transaction to be mined before returning
-chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --wait
+# Live execution with a keystore; prompts for password if needed
+chainpilot --keystore-path ~/.chainpilot/main.json swap execute --quote-id <QUOTE_ID>
+
+# Non-interactive keystore execution
+chainpilot --keystore-path ~/.chainpilot/main.json --password-file ~/.chainpilot/main.pass \
+  swap execute --quote-id <QUOTE_ID> --wait
 
 # Override gas parameters
 chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... \
@@ -200,6 +215,9 @@ chainpilot swap history --limit 50 --status confirmed
 # Approve from a saved quote (derives token and DODOApprove spender automatically)
 chainpilot swap approve --quote-id <QUOTE_ID> --private-key 0x...
 
+# Same flow with a keystore signer
+chainpilot --keystore-path ~/.chainpilot/main.json swap approve --quote-id <QUOTE_ID>
+
 # Explicit token, spender, and amount
 chainpilot swap approve --token USDC --spender 0x... --amount 1000 --private-key 0x...
 
@@ -213,6 +231,9 @@ chainpilot swap approve --quote-id <QUOTE_ID> --dry-run
 **Revoke an approval:**
 ```bash
 chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --private-key 0x...
+
+# Keystore signer
+chainpilot --keystore-path ~/.chainpilot/main.json swap revoke --token 0xTokenAddr --spender 0xSpenderAddr
 
 # Dry-run
 chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --dry-run

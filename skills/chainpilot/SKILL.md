@@ -47,6 +47,9 @@ chainpilot [GLOBAL_FLAGS] <COMMAND> [SUBcommand_FLAGS]
 | `--json` | — | off | Structured JSON output for scripting |
 | `--quiet` | — | off | Suppress all output except errors |
 | `--private-key <hex>` | `PRIVATE_KEY` | — | Signer for write transactions |
+| `--keystore-path <path>` | `KEYSTORE_PATH` | — | Encrypted JSON keystore for write transactions |
+| `--password-file <path>` | `KEYSTORE_PASSWORD_FILE` | — | Read keystore password from file |
+| `--password-env <NAME>` | `KEYSTORE_PASSWORD_ENV` | — | Read keystore password from the named env var |
 | `--wallet-address <addr>` | `WALLET_ADDRESS` | — | Read-only wallet context |
 | `--rpc-url <url>` | — | Chain's public RPC | Explicit JSON-RPC override |
 | `--chain-id <id>` | `CHAIN_ID` | `1` | Global chain context |
@@ -55,10 +58,19 @@ chainpilot [GLOBAL_FLAGS] <COMMAND> [SUBcommand_FLAGS]
 carry those values forward to all subsequent commands in the same conversation unless
 the user explicitly asks for a different one.
 
-Runtime env vars are intentionally limited to `PRIVATE_KEY`, `WALLET_ADDRESS`,
-`CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`, and `DODO_API_URL`.
+Runtime env vars are intentionally limited to `PRIVATE_KEY`, `KEYSTORE_PATH`,
+`KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`,
+`WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`, and
+`DODO_API_URL`.
 
 Config precedence: CLI flag > env var > `.env` file > compile-time default.
+
+If `--keystore-path` is set, password resolution order is:
+
+1. `--password-file`
+2. `--password-env <NAME>`
+3. `KEYSTORE_PASSWORD`
+4. Interactive prompt when running in a TTY
 
 ## JSON Envelope
 
@@ -86,10 +98,10 @@ QUOTE_ID=$(chainpilot --json --chain-id 1 swap quote \
 chainpilot swap simulate --quote-id "$QUOTE_ID" --wallet 0xYourAddress
 
 # 3. Approve token spending if needed (skip for native ETH swaps)
-chainpilot --private-key "$PRIVATE_KEY" swap approve --quote-id "$QUOTE_ID"
+chainpilot --keystore-path /path/to/keystore.json swap approve --quote-id "$QUOTE_ID"
 
 # 4. Execute and wait for on-chain confirmation
-chainpilot --private-key "$PRIVATE_KEY" swap execute --quote-id "$QUOTE_ID" --wait
+chainpilot --keystore-path /path/to/keystore.json swap execute --quote-id "$QUOTE_ID" --wait
 ```
 
 Quotes have a **dual TTL**: the DODO-issued route expires in 20 minutes; the
@@ -146,6 +158,9 @@ Approve the DODO router to spend the from-token on your behalf.
 # From a saved quote (derives token + spender automatically)
 chainpilot --private-key 0x... swap approve --quote-id <ID>
 
+# Same flow with a keystore signer
+chainpilot --keystore-path /path/to/keystore.json swap approve --quote-id <ID>
+
 # Explicit token, spender, and amount
 chainpilot --private-key 0x... swap approve --token USDC --spender 0x... --amount 1000
 
@@ -160,6 +175,13 @@ chainpilot swap approve --quote-id <ID> --dry-run
 
 ```bash
 chainpilot --private-key 0x... swap execute --quote-id <ID> [OPTIONS]
+
+# Keystore signer; prompts for password if needed
+chainpilot --keystore-path /path/to/keystore.json swap execute --quote-id <ID> [OPTIONS]
+
+# Non-interactive keystore execution
+chainpilot --keystore-path /path/to/keystore.json --password-file /path/to/keystore.pass \
+  swap execute --quote-id <ID> [OPTIONS]
 ```
 
 | Flag | Description |
@@ -177,6 +199,7 @@ chainpilot --private-key 0x... swap execute --quote-id <ID> [OPTIONS]
 ```bash
 chainpilot swap revoke --token <ADDR> --spender <ADDR> [--dry-run]
 chainpilot --private-key 0x... swap revoke --token USDC --spender 0xRouter
+chainpilot --keystore-path /path/to/keystore.json swap revoke --token USDC --spender 0xRouter
 ```
 
 - `--dry-run`: dry-run mode, private-key not required.
@@ -305,6 +328,7 @@ chainpilot --json swap quote --from ETH --to USDC --amount 1.0 | jq .
 
 # Quiet execution — only care about the exit code
 chainpilot --quiet --private-key "$PRIVATE_KEY" swap execute --quote-id "$QUOTE_ID" --wait
+chainpilot --quiet --keystore-path /path/to/keystore.json swap execute --quote-id "$QUOTE_ID" --wait
 echo $?  # 0 = success
 ```
 

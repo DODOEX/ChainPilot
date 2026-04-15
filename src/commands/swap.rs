@@ -3,6 +3,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::process::ExitCode;
 
+use alloy_signer_local::PrivateKeySigner;
+
 use crate::api::ApiClients;
 use crate::chain::OnChainClient;
 use crate::cli::swap::{
@@ -115,7 +117,7 @@ trait ExecuteDeps {
     fn send_tx<'a>(
         &'a self,
         chain_id: u64,
-        private_key: &'a str,
+        signer: PrivateKeySigner,
         to: Address,
         data: &'a str,
         value_hex: &'a str,
@@ -149,7 +151,7 @@ impl ExecuteDeps for LiveExecuteDeps<'_> {
     fn send_tx<'a>(
         &'a self,
         chain_id: u64,
-        private_key: &'a str,
+        signer: PrivateKeySigner,
         to: Address,
         data: &'a str,
         value_hex: &'a str,
@@ -160,7 +162,7 @@ impl ExecuteDeps for LiveExecuteDeps<'_> {
             crate::chain::send_tx(
                 self.exec_rpc_url,
                 chain_id,
-                private_key,
+                signer,
                 to,
                 data,
                 value_hex,
@@ -183,7 +185,7 @@ trait ApprovalDeps {
     fn send_tx<'a>(
         &'a self,
         chain_id: u64,
-        private_key: &'a str,
+        signer: PrivateKeySigner,
         to: Address,
         data: &'a str,
         value_hex: &'a str,
@@ -198,7 +200,7 @@ impl ApprovalDeps for LiveApprovalDeps<'_> {
     fn send_tx<'a>(
         &'a self,
         chain_id: u64,
-        private_key: &'a str,
+        signer: PrivateKeySigner,
         to: Address,
         data: &'a str,
         value_hex: &'a str,
@@ -207,7 +209,7 @@ impl ApprovalDeps for LiveApprovalDeps<'_> {
             crate::chain::send_tx(
                 self.chain_rpc,
                 chain_id,
-                private_key,
+                signer,
                 to,
                 data,
                 value_hex,
@@ -663,16 +665,15 @@ fn revoke_calldata(spender_addr: Address) -> String {
 async fn send_approval_with_deps<D: ApprovalDeps>(
     deps: &D,
     chain_id: u64,
-    private_key: &str,
+    signer: PrivateKeySigner,
     token_addr: Address,
     spender_addr: Address,
     raw_amount: String,
     calldata_hex: &str,
 ) -> Result<crate::models::swap::ApprovalResult> {
-    use crate::chain::address_from_private_key;
-    let from_addr = address_from_private_key(private_key)?;
+    let from_addr = signer.address();
     let (_from, tx_hash) = deps
-        .send_tx(chain_id, private_key, token_addr, calldata_hex, "0x0")
+        .send_tx(chain_id, signer, token_addr, calldata_hex, "0x0")
         .await?;
 
     Ok(crate::models::swap::ApprovalResult {
@@ -746,32 +747,25 @@ async fn execute_quote_with_deps<D: ExecuteDeps>(
     config: &AppConfig,
     quote_data: &Quote,
 ) -> Result<ExecutionResult> {
-    use crate::chain::address_from_private_key;
     use alloy::primitives::Address;
     use std::time::Duration;
 
-    let private_key = config.private_key.as_deref();
-
-    if !args.dry_run && private_key.is_none() {
-        return Err(ChainError::NoWallet);
-    }
-
     let (from_address, tx_hash, status, gas_used, effective_gas_price_gwei) = if args.dry_run {
         let addr = dry_run_from_address(
-            private_key
-                .and_then(|pk| address_from_private_key(pk).ok())
-                .map(|a| a.to_string()),
+            crate::chain::resolve_signer(config)
+                .ok()
+                .map(|signer| signer.address().to_string()),
             args.wallet.clone(),
             config.wallet_address.clone(),
         );
         (addr, None, ExecutionStatus::DryRun, None, None)
     } else {
-        let pk = private_key.unwrap();
+        let signer = crate::chain::resolve_signer(config)?;
         let to_addr: Address = quote_data
             .router_to
             .parse()
             .map_err(|_| ChainError::InvalidAddress(quote_data.router_to.clone()))?;
-        let from_addr = address_from_private_key(pk)?;
+        let from_addr = signer.address();
 
         let estimated_gas_from_node = if args.gas_limit.is_none() && !args.skip_estimate {
             Some(
@@ -794,7 +788,7 @@ async fn execute_quote_with_deps<D: ExecuteDeps>(
         let (_sent_from, tx_hash_str) = deps
             .send_tx(
                 quote_data.chain_id,
-                pk,
+                signer,
                 to_addr,
                 &quote_data.calldata,
                 &quote_data.value,
@@ -988,18 +982,36 @@ async fn approve(
     //   arg[1]    = amount as 32-byte big-endian
     let calldata_hex = approve_calldata(spender_addr, amount_u256);
 
-    let private_key = config.private_key.as_deref();
+    let signer = match crate::chain::resolve_signer(config) {
+        Ok(signer) => Some(signer),
+        Err(ChainError::NoWallet) if args.dry_run => None,
+        Err(ChainError::NoWallet) => None,
+        Err(e) if args.dry_run => {
+            return Ok(crate::output::print_output::<ApprovalResult>(
+                Err(e),
+                "swap.approve",
+                output_mode,
+                OutputContext::new(chain_id, true),
+            ));
+        }
+        Err(e) => {
+            return Ok(crate::output::print_output::<ApprovalResult>(
+                Err(e),
+                "swap.approve",
+                output_mode,
+                OutputContext::new(chain_id, false),
+            ));
+        }
+    };
 
-    if args.dry_run || private_key.is_none() {
+    if args.dry_run || signer.is_none() {
         let result = ApprovalResult {
             token: token_addr.to_string(),
             spender: spender_addr.to_string(),
             raw_amount: raw_amount_str,
             dry_run: true,
             tx_hash: None,
-            from_address: private_key
-                .and_then(|pk| crate::chain::address_from_private_key(pk).ok())
-                .map(|a| a.to_string()),
+            from_address: signer.as_ref().map(|signer| signer.address().to_string()),
         };
         let dry_run = result.dry_run;
         return Ok(crate::output::print_output::<ApprovalResult>(
@@ -1013,7 +1025,7 @@ async fn approve(
     match send_approval_with_deps(
         &LiveApprovalDeps { chain_rpc: &chain_rpc },
         chain_id,
-        private_key.unwrap(),
+        signer.unwrap(),
         token_addr,
         spender_addr,
         raw_amount_str,
@@ -1073,18 +1085,36 @@ async fn revoke(
     // approve(address,uint256) with amount 0 revokes ERC-20 allowance.
     let calldata_hex = revoke_calldata(spender_addr);
 
-    let private_key = config.private_key.as_deref();
+    let signer = match crate::chain::resolve_signer(config) {
+        Ok(signer) => Some(signer),
+        Err(ChainError::NoWallet) if args.dry_run => None,
+        Err(ChainError::NoWallet) => None,
+        Err(e) if args.dry_run => {
+            return Ok(crate::output::print_output::<ApprovalResult>(
+                Err(e),
+                "swap.revoke",
+                output_mode,
+                OutputContext::new(chain_id, true),
+            ));
+        }
+        Err(e) => {
+            return Ok(crate::output::print_output::<ApprovalResult>(
+                Err(e),
+                "swap.revoke",
+                output_mode,
+                OutputContext::new(chain_id, false),
+            ));
+        }
+    };
 
-    if args.dry_run || private_key.is_none() {
+    if args.dry_run || signer.is_none() {
         let result = ApprovalResult {
             token: token_addr.to_string(),
             spender: spender_addr.to_string(),
             raw_amount: "0".to_string(),
             dry_run: true,
             tx_hash: None,
-            from_address: private_key
-                .and_then(|pk| crate::chain::address_from_private_key(pk).ok())
-                .map(|a| a.to_string()),
+            from_address: signer.as_ref().map(|signer| signer.address().to_string()),
         };
         let dry_run = result.dry_run;
         return Ok(crate::output::print_output::<ApprovalResult>(
@@ -1097,7 +1127,7 @@ async fn revoke(
     match send_approval_with_deps(
         &LiveApprovalDeps { chain_rpc: &chain_rpc },
         chain_id,
-        private_key.unwrap(),
+        signer.unwrap(),
         token_addr,
         spender_addr,
         "0".to_string(),
@@ -1210,7 +1240,7 @@ mod tests {
         fn send_tx<'a>(
             &'a self,
             _chain_id: u64,
-            _private_key: &'a str,
+            _signer: PrivateKeySigner,
             _to: Address,
             _data: &'a str,
             _value_hex: &'a str,
@@ -1246,7 +1276,7 @@ mod tests {
         fn send_tx<'a>(
             &'a self,
             _chain_id: u64,
-            _private_key: &'a str,
+            _signer: PrivateKeySigner,
             _to: Address,
             _data: &'a str,
             _value_hex: &'a str,
@@ -1266,6 +1296,9 @@ mod tests {
             rpc_url_overridden: false,
             chain_id,
             private_key: None,
+            keystore_path: None,
+            keystore_password_file: None,
+            keystore_password_env: None,
             wallet_address: None,
             dodo_api_url: "https://api.example.com".to_string(),
             dodo_api_key: String::new(),
@@ -1767,8 +1800,23 @@ mod tests {
 
     #[tokio::test]
     async fn send_approval_with_deps_returns_tx_hash_and_sender() {
-        let signer = "0x59c6995e998f97a5a0044966f0945382dbf7f50a3f2f72f5f7a0b7d7d4f5e5f1";
-        let expected_from = crate::chain::address_from_private_key(signer).unwrap();
+        let private_key = "0x59c6995e998f97a5a0044966f0945382dbf7f50a3f2f72f5f7a0b7d7d4f5e5f1";
+        let signer = crate::chain::resolve_signer(&AppConfig {
+            rpc_url: String::new(),
+            rpc_url_overridden: false,
+            chain_id: 1,
+            private_key: Some(private_key.to_string()),
+            keystore_path: None,
+            keystore_password_file: None,
+            keystore_password_env: None,
+            wallet_address: None,
+            dodo_api_url: String::new(),
+            dodo_api_key: String::new(),
+            dodo_project_id: String::new(),
+            data_dir: std::env::temp_dir(),
+        })
+        .unwrap();
+        let expected_from = signer.address();
         let deps = MockApprovalDeps {
             send_tx_result: Ok((expected_from, "0xapprove".to_string())),
         };

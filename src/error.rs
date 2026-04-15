@@ -16,11 +16,14 @@ pub enum ChainError {
     #[error("Invalid address: {0}")]
     InvalidAddress(String),
 
-    #[error("No wallet configured. Set PRIVATE_KEY env var or use --private-key flag")]
+    #[error("No wallet configured. Set PRIVATE_KEY/KEYSTORE_PATH env vars or use --private-key/--keystore-path")]
     NoWallet,
 
     #[error("Invalid private key: {0}")]
     InvalidPrivateKey(String),
+
+    #[error("Keystore error: {0}")]
+    Keystore(String),
 
     #[error("Invalid amount: {0}")]
     InvalidAmount(String),
@@ -81,6 +84,8 @@ mod tests {
         let e = ChainError::NoWallet;
         assert!(e.to_string().contains("PRIVATE_KEY"));
         assert!(e.to_string().contains("--private-key"));
+        assert!(e.to_string().contains("KEYSTORE_PATH"));
+        assert!(e.to_string().contains("--keystore-path"));
     }
 
     #[test]

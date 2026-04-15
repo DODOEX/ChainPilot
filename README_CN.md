@@ -51,11 +51,15 @@ DODO_PROJECT_ID=your-id
 
 ## 配置
 
-环境变量刻意收敛为少数几个。运行时只读取 `PRIVATE_KEY`、`WALLET_ADDRESS`、`CHAIN_ID`、`DODO_API_KEY`、`DODO_PROJECT_ID`、`DODO_API_URL`；有对应 CLI 标志的情况下，CLI 仍然优先。
+环境变量刻意收敛为少数几个。运行时只读取 `PRIVATE_KEY`、`KEYSTORE_PATH`、`KEYSTORE_PASSWORD_FILE`、`KEYSTORE_PASSWORD_ENV`、`KEYSTORE_PASSWORD`、`WALLET_ADDRESS`、`CHAIN_ID`、`DODO_API_KEY`、`DODO_PROJECT_ID`、`DODO_API_URL`；有对应 CLI 标志的情况下，CLI 仍然优先。
 
 | 变量名                 | CLI 标志              | 默认值                       | 说明                               |
 |------------------------|-----------------------|------------------------------|------------------------------------|
 | `PRIVATE_KEY`          | `--private-key`       | —                            | 用于签署交易的私钥                 |
+| `KEYSTORE_PATH`        | `--keystore-path`     | —                            | 用于签署交易的加密 JSON keystore   |
+| `KEYSTORE_PASSWORD_FILE` | `--password-file`   | —                            | 从文件读取 keystore 密码           |
+| `KEYSTORE_PASSWORD_ENV` | `--password-env`     | —                            | 从指定环境变量读取 keystore 密码   |
+| `KEYSTORE_PASSWORD`    | —                     | —                            | keystore 密码的默认环境变量        |
 | `WALLET_ADDRESS`       | `--wallet-address`    | —                            | 余额查询 / 模拟时使用的钱包地址    |
 | `--rpc-url`            | 仅 CLI                | 链内置公共 RPC               | 显式覆盖 JSON-RPC 端点             |
 | `CHAIN_ID`             | `--chain-id`          | `1`（以太坊主网）            | 当前链 ID                          |
@@ -63,7 +67,7 @@ DODO_PROJECT_ID=your-id
 | `DODO_PROJECT_ID`      | —                     | 编译时内嵌默认值             | DODO 项目 ID，用于代币列表查询     |
 | `DODO_API_URL`         | —                     | DODO 生产端点                | 覆盖路由 API 地址                  |
 
-全局标志（`--json`、`--quiet`、`--private-key`、`--wallet-address`、`--rpc-url`、`--chain-id`）适用于所有子命令，需放在子命令名称之前：
+全局标志（`--json`、`--quiet`、`--private-key`、`--keystore-path`、`--password-file`、`--password-env`、`--wallet-address`、`--rpc-url`、`--chain-id`）适用于所有子命令，需放在子命令名称之前：
 
 ```bash
 chainpilot --json --chain-id 42161 swap quote --from ETH --to USDC --amount 1.0
@@ -74,6 +78,13 @@ chainpilot --json --chain-id 42161 swap quote --from ETH --to USDC --amount 1.0
 ```bash
 RUST_LOG=debug chainpilot ...
 ```
+
+如果设置了 `--keystore-path`，密码读取优先级如下：
+
+1. `--password-file`
+2. `--password-env <NAME>`
+3. `KEYSTORE_PASSWORD`
+4. 在 TTY 终端里交互输入
 
 ## 代币解析
 
@@ -120,10 +131,10 @@ QUOTE_ID=$(chainpilot --json swap quote --from ETH --to USDC --amount 0.1 | jq -
 chainpilot swap simulate --quote-id "$QUOTE_ID" --wallet 0xYourAddress
 
 # 3. 如有需要，授权代币（原生 ETH 兑换可跳过）
-chainpilot swap approve --quote-id "$QUOTE_ID" --private-key "$PRIVATE_KEY"
+chainpilot --keystore-path ~/.chainpilot/main.json swap approve --quote-id "$QUOTE_ID"
 
 # 4. 执行并等待确认
-chainpilot swap execute --quote-id "$QUOTE_ID" --private-key "$PRIVATE_KEY" --wait
+chainpilot --keystore-path ~/.chainpilot/main.json swap execute --quote-id "$QUOTE_ID" --wait
 ```
 
 报价的本地有效期默认是 18 分钟，DODO 签发的路由本身有 20 分钟截止时间。`simulate` 和 `execute` 均会拒绝已过期的报价。
@@ -156,11 +167,15 @@ chainpilot swap simulate --quote-id <QUOTE_ID> --wallet 0xYourAddress
 # 演习模式：构建并模拟交易，不广播
 chainpilot swap execute --quote-id <QUOTE_ID> --dry-run --wallet 0xYourAddress
 
-# 正式执行（需要 PRIVATE_KEY）
+# 用裸私钥正式执行
 chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x...
 
-# 等待交易上链后再返回
-chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --wait
+# 用 keystore 正式执行；如有需要会交互输入密码
+chainpilot --keystore-path ~/.chainpilot/main.json swap execute --quote-id <QUOTE_ID>
+
+# 非交互方式执行 keystore 交易
+chainpilot --keystore-path ~/.chainpilot/main.json --password-file ~/.chainpilot/main.pass \
+  swap execute --quote-id <QUOTE_ID> --wait
 
 # 覆盖 Gas 参数
 chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... \
@@ -200,6 +215,9 @@ chainpilot swap history --limit 50 --status confirmed
 # 从已保存的报价授权（自动推导代币和 DODOApprove 合约地址）
 chainpilot swap approve --quote-id <QUOTE_ID> --private-key 0x...
 
+# 同样支持 keystore signer
+chainpilot --keystore-path ~/.chainpilot/main.json swap approve --quote-id <QUOTE_ID>
+
 # 显式指定代币、授权方和额度
 chainpilot swap approve --token USDC --spender 0x... --amount 1000 --private-key 0x...
 
@@ -213,6 +231,9 @@ chainpilot swap approve --quote-id <QUOTE_ID> --dry-run
 **撤销授权：**
 ```bash
 chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --private-key 0x...
+
+# keystore signer
+chainpilot --keystore-path ~/.chainpilot/main.json swap revoke --token 0xTokenAddr --spender 0xSpenderAddr
 
 # 演习模式
 chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --dry-run

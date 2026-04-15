@@ -72,7 +72,10 @@ fn error_code_and_suggestion(err: &ChainError) -> (String, Option<String>) {
         ),
         ChainError::NoWallet => (
             "no_wallet".to_string(),
-            Some("Set PRIVATE_KEY env var or use --private-key flag.".to_string()),
+            Some(
+                "Set PRIVATE_KEY or KEYSTORE_PATH, or use --private-key / --keystore-path."
+                    .to_string(),
+            ),
         ),
         ChainError::InvalidAmount(_) => (
             "invalid_amount".to_string(),

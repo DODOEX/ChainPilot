@@ -25,6 +25,18 @@ pub struct Cli {
     #[arg(long, env = "PRIVATE_KEY", global = true, hide_env_values = true)]
     pub private_key: Option<String>,
 
+    /// Path to an encrypted JSON keystore for signing
+    #[arg(long, env = "KEYSTORE_PATH", global = true)]
+    pub keystore_path: Option<String>,
+
+    /// Read the keystore password from a file
+    #[arg(long, env = "KEYSTORE_PASSWORD_FILE", global = true)]
+    pub password_file: Option<String>,
+
+    /// Read the keystore password from the named environment variable
+    #[arg(long, env = "KEYSTORE_PASSWORD_ENV", global = true)]
+    pub password_env: Option<String>,
+
     /// Wallet address to use for quote/simulate context (overrides WALLET_ADDRESS env var)
     #[arg(long, env = "WALLET_ADDRESS", global = true)]
     pub wallet_address: Option<String>,

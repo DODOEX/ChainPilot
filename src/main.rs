@@ -13,7 +13,7 @@ mod models;
 mod output;
 mod store;
 
-use crate::chain::{address_from_private_key, resolve_signer};
+use crate::chain::address_from_private_key;
 use crate::cli::Cli;
 use crate::config::AppConfig;
 use crate::output::OutputMode;
@@ -46,16 +46,11 @@ fn apply_cli_overrides(config: &mut AppConfig, cli: &Cli) {
     if let Some(wallet_address) = cli.wallet_address.clone() {
         config.wallet_address = Some(wallet_address);
     } else if config.wallet_address.is_none() {
-        config.wallet_address = resolve_signer(config)
-            .ok()
-            .map(|signer| signer.address().to_string())
-            .or_else(|| {
-                config
-                    .private_key
-                    .as_deref()
-                    .and_then(|pk| address_from_private_key(pk).ok())
-                    .map(|addr| addr.to_string())
-            });
+        config.wallet_address = config
+            .private_key
+            .as_deref()
+            .and_then(|pk| address_from_private_key(pk).ok())
+            .map(|addr| addr.to_string());
     }
 }
 
