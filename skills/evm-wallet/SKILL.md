@@ -58,6 +58,8 @@ Private key: 0xdeadbeef...
 
 > The private key is printed once and never stored. Save it immediately, then use `cast wallet import` to encrypt it into a keystore.
 
+**After creating, ask the user**: "Would you like to import this key into a keystore for safer storage?" If yes, guide them to use `cast wallet import` with either interactive password or a password file.
+
 ---
 
 ## Derive Address from Private Key
