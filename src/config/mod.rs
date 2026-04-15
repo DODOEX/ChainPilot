@@ -9,6 +9,7 @@ pub const DEFAULT_CHAIN_ID: u64 = 1;
 /// Fallback RPC used only when no chain config matches the active chain_id.
 const FALLBACK_RPC_URL: &str = "https://ethereum-rpc.publicnode.com";
 pub const DEFAULT_DODO_API_URL: &str = "https://api.dodoex.io/route-service/v2/widget/getdodoroute";
+pub const DEFAULT_KEYSTORE_PASSWORD_ENV: &str = "KEYSTORE_PASSWORD";
 
 /// Compile-time default: set `DODO_API_KEY` at build time to bake a key into the binary.
 /// Runtime `DODO_API_KEY` env var takes precedence.
@@ -33,6 +34,9 @@ pub struct AppConfig {
     pub rpc_url_overridden: bool,
     pub chain_id: u64,
     pub private_key: Option<String>,
+    pub keystore_path: Option<String>,
+    pub keystore_password_file: Option<String>,
+    pub keystore_password_env: Option<String>,
     pub wallet_address: Option<String>,
     pub dodo_api_url: String,
     pub dodo_api_key: String,
@@ -58,6 +62,11 @@ impl AppConfig {
         };
 
         let private_key = std::env::var("PRIVATE_KEY").ok();
+        let keystore_path = std::env::var("KEYSTORE_PATH").ok();
+        let keystore_password_file = std::env::var("KEYSTORE_PASSWORD_FILE").ok();
+        let keystore_password_env = std::env::var("KEYSTORE_PASSWORD_ENV")
+            .ok()
+            .or_else(|| std::env::var(DEFAULT_KEYSTORE_PASSWORD_ENV).ok().map(|_| DEFAULT_KEYSTORE_PASSWORD_ENV.to_string()));
         let wallet_address = std::env::var("WALLET_ADDRESS").ok();
 
         let data_dir = dirs::data_local_dir()
@@ -78,6 +87,9 @@ impl AppConfig {
             rpc_url_overridden,
             chain_id,
             private_key,
+            keystore_path,
+            keystore_password_file,
+            keystore_password_env,
             wallet_address,
             dodo_api_url,
             dodo_api_key,
@@ -108,6 +120,14 @@ impl AppConfig {
             .and_then(|c| c.rpc_urls.first().copied())
             .unwrap_or(self.rpc_url.as_str())
             .to_string()
+    }
+
+    /// Update the active chain while preserving explicit RPC overrides.
+    pub fn set_chain_id(&mut self, chain_id: u64) {
+        if !self.rpc_url_overridden {
+            self.rpc_url = self.rpc_url_for_chain(chain_id);
+        }
+        self.chain_id = chain_id;
     }
 
     pub fn quotes_dir(&self) -> PathBuf {
@@ -214,6 +234,40 @@ mod tests {
     }
 
     #[test]
+    fn keystore_fields_read_from_env() {
+        with_env(
+            &[
+                ("KEYSTORE_PATH", Some("/tmp/test.keystore")),
+                ("KEYSTORE_PASSWORD_FILE", Some("/tmp/test.pass")),
+                ("KEYSTORE_PASSWORD_ENV", Some("CHAINPILOT_PASS")),
+            ],
+            || {
+                let cfg = AppConfig::load().unwrap();
+                assert_eq!(cfg.keystore_path.as_deref(), Some("/tmp/test.keystore"));
+                assert_eq!(
+                    cfg.keystore_password_file.as_deref(),
+                    Some("/tmp/test.pass")
+                );
+                assert_eq!(
+                    cfg.keystore_password_env.as_deref(),
+                    Some("CHAINPILOT_PASS")
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn default_keystore_password_env_is_detected_when_value_present() {
+        with_env(&[(DEFAULT_KEYSTORE_PASSWORD_ENV, Some("secret"))], || {
+            let cfg = AppConfig::load().unwrap();
+            assert_eq!(
+                cfg.keystore_password_env.as_deref(),
+                Some(DEFAULT_KEYSTORE_PASSWORD_ENV)
+            );
+        });
+    }
+
+    #[test]
     fn rpc_url_for_chain_prefers_explicit_override() {
         with_env(&[("CHAIN_ID", Some("1"))], || {
             let mut cfg = AppConfig::load().unwrap();
@@ -228,6 +282,28 @@ mod tests {
         with_env(&[("CHAIN_ID", Some("1"))], || {
             let cfg = AppConfig::load().unwrap();
             assert_eq!(cfg.rpc_url_for_chain(8453), "https://mainnet.base.org");
+        });
+    }
+
+    #[test]
+    fn set_chain_id_updates_rpc_url_when_not_overridden() {
+        with_env(&[("CHAIN_ID", Some("1"))], || {
+            let mut cfg = AppConfig::load().unwrap();
+            cfg.set_chain_id(11155111);
+            assert_eq!(cfg.chain_id, 11155111);
+            assert_eq!(cfg.rpc_url, "https://ethereum-sepolia-rpc.publicnode.com");
+        });
+    }
+
+    #[test]
+    fn set_chain_id_preserves_explicit_rpc_override() {
+        with_env(&[("CHAIN_ID", Some("1"))], || {
+            let mut cfg = AppConfig::load().unwrap();
+            cfg.rpc_url = "https://override.example.com".to_string();
+            cfg.rpc_url_overridden = true;
+            cfg.set_chain_id(11155111);
+            assert_eq!(cfg.chain_id, 11155111);
+            assert_eq!(cfg.rpc_url, "https://override.example.com");
         });
     }
 
