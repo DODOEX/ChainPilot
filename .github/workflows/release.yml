@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - Cargo.toml
+      - .github/workflows/release.yml
+      - Cargo.lock
 
 permissions:
   contents: write
