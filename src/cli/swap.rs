@@ -129,7 +129,6 @@ pub struct ApproveArgs {
     /// Dry-run mode: show what would be approved without sending
     #[arg(long)]
     pub dry_run: bool,
-
 }
 
 #[derive(Args)]
@@ -142,5 +141,4 @@ pub struct RevokeArgs {
 
     #[arg(long)]
     pub dry_run: bool,
-
 }

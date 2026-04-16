@@ -218,10 +218,7 @@ fn resolve_keystore_password(config: &AppConfig) -> Result<String> {
 
     if let Some(password_env) = config.keystore_password_env.as_deref() {
         return std::env::var(password_env).map_err(|_| {
-            ChainError::Keystore(format!(
-                "environment variable {} is not set",
-                password_env
-            ))
+            ChainError::Keystore(format!("environment variable {} is not set", password_env))
         });
     }
 
@@ -233,9 +230,9 @@ fn resolve_keystore_password(config: &AppConfig) -> Result<String> {
         eprint!("Keystore password: ");
         let _ = std::io::Write::flush(&mut std::io::stderr());
         let mut password = String::new();
-        std::io::stdin()
-            .read_line(&mut password)
-            .map_err(|e| ChainError::Keystore(format!("failed to read keystore password: {}", e)))?;
+        std::io::stdin().read_line(&mut password).map_err(|e| {
+            ChainError::Keystore(format!("failed to read keystore password: {}", e))
+        })?;
         return Ok(trim_password(password));
     }
 

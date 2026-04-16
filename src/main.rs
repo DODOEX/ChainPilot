@@ -144,7 +144,10 @@ mod tests {
             apply_cli_overrides(&mut config, &cli);
 
             assert_eq!(config.chain_id, 11155111);
-            assert_eq!(config.rpc_url, "https://ethereum-sepolia-rpc.publicnode.com");
+            assert_eq!(
+                config.rpc_url,
+                "https://ethereum-sepolia-rpc.publicnode.com"
+            );
             assert!(!config.rpc_url_overridden);
         });
     }
@@ -195,7 +198,10 @@ mod tests {
 
                 apply_cli_overrides(&mut config, &cli);
 
-                assert_eq!(config.keystore_path.as_deref(), Some("/tmp/test-keystore.json"));
+                assert_eq!(
+                    config.keystore_path.as_deref(),
+                    Some("/tmp/test-keystore.json")
+                );
                 assert!(config.private_key.is_none());
             },
         );

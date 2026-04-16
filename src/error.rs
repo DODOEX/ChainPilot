@@ -35,7 +35,9 @@ pub enum ChainError {
         token: String,
     },
 
-    #[error("Token not approved. Run: chainpilot swap approve --token {token} --spender {spender}")]
+    #[error(
+        "Token not approved. Run: chainpilot swap approve --token {token} --spender {spender}"
+    )]
     NotApproved { token: String, spender: String },
 
     #[error("Quote not found or expired: {0}. Run 'chainpilot swap quote' again.")]

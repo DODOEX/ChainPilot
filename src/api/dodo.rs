@@ -240,7 +240,10 @@ impl DodoClient {
                     return Ok(result);
                 }
                 Err(e) => {
-                    eprintln!("Warning: tokenlist API unavailable ({}), falling back to cache", e);
+                    eprintln!(
+                        "Warning: tokenlist API unavailable ({}), falling back to cache",
+                        e
+                    );
                 }
             }
         }
@@ -274,16 +277,20 @@ impl DodoClient {
 
         let text = resp.text().await.map_err(|e| ChainError::DodoApi {
             code: 0,
-            message: format!("failed to read tokenlist response body: {}", e.without_url()),
-        })?;
-        let val: serde_json::Value = serde_json::from_str(&text).map_err(|e| ChainError::DodoApi {
-            code: 0,
             message: format!(
-                "tokenlist response is not valid JSON ({}): {}",
-                e,
-                text.chars().take(120).collect::<String>()
+                "failed to read tokenlist response body: {}",
+                e.without_url()
             ),
         })?;
+        let val: serde_json::Value =
+            serde_json::from_str(&text).map_err(|e| ChainError::DodoApi {
+                code: 0,
+                message: format!(
+                    "tokenlist response is not valid JSON ({}): {}",
+                    e,
+                    text.chars().take(120).collect::<String>()
+                ),
+            })?;
 
         // Response may be wrapped: { data: { chains: [...] } } or { chains: [...] }
         let chains = val["data"]["chains"]
