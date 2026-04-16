@@ -5,22 +5,32 @@ use uuid::Uuid;
 use crate::config::AppConfig;
 use crate::error::Result;
 use crate::models::quote::Quote;
+use crate::models::token::{CustomTokenRecord, TokenInfo};
+use serde::{Deserialize, Serialize};
 
 pub struct QuoteStore {
     quotes_dir: PathBuf,
     history_dir: PathBuf,
+    custom_tokens_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct CustomTokenStoreFile {
+    tokens: Vec<CustomTokenRecord>,
 }
 
 impl QuoteStore {
     pub fn new(config: &AppConfig) -> Result<Self> {
         let quotes_dir = config.quotes_dir();
         let history_dir = config.history_dir();
+        let custom_tokens_path = config.custom_tokens_path();
         std::fs::create_dir_all(&quotes_dir)?;
         std::fs::create_dir_all(&history_dir)?;
 
         Ok(Self {
             quotes_dir,
             history_dir,
+            custom_tokens_path,
         })
     }
 
@@ -108,6 +118,56 @@ impl QuoteStore {
         Ok(records)
     }
 
+    pub fn save_custom_token_info(&self, info: &TokenInfo) -> Result<CustomTokenRecord> {
+        let record = CustomTokenRecord::from_token_info(info);
+        self.save_custom_token(&record)?;
+        Ok(record)
+    }
+
+    pub fn save_custom_token(&self, token: &CustomTokenRecord) -> Result<()> {
+        let mut file = self.load_custom_tokens_file()?;
+        file.tokens.retain(|existing| {
+            !(existing.chain_id == token.chain_id
+                && existing.address.eq_ignore_ascii_case(&token.address))
+        });
+        file.tokens.push(token.clone());
+        self.save_custom_tokens_file(&file)
+    }
+
+    pub fn find_custom_token_by_symbol(
+        &self,
+        chain_id: u64,
+        symbol: &str,
+    ) -> Result<Option<crate::models::quote::TokenRef>> {
+        let upper = symbol.to_uppercase();
+        let file = self.load_custom_tokens_file()?;
+        Ok(file
+            .tokens
+            .iter()
+            .rev()
+            .find(|token| token.chain_id == chain_id && token.symbol.to_uppercase() == upper)
+            .map(|token| crate::models::quote::TokenRef {
+                symbol: token.symbol.clone(),
+                address: token.address.clone(),
+                decimals: token.decimals,
+                chain_id: token.chain_id,
+            }))
+    }
+
+    fn load_custom_tokens_file(&self) -> Result<CustomTokenStoreFile> {
+        if !self.custom_tokens_path.exists() {
+            return Ok(CustomTokenStoreFile::default());
+        }
+        let json = std::fs::read_to_string(&self.custom_tokens_path)?;
+        Ok(serde_json::from_str(&json)?)
+    }
+
+    fn save_custom_tokens_file(&self, file: &CustomTokenStoreFile) -> Result<()> {
+        let json = serde_json::to_string_pretty(file)?;
+        std::fs::write(&self.custom_tokens_path, json)?;
+        Ok(())
+    }
+
     fn quote_path(&self, quote_id: &str) -> PathBuf {
         self.quotes_dir.join(format!("{}.json", quote_id))
     }
@@ -123,6 +183,7 @@ mod tests {
     use crate::config::AppConfig;
     use crate::models::quote::{Quote, TokenRef};
     use crate::models::swap::{ExecutionResult, ExecutionStatus, SwapHistoryRecord};
+    use crate::models::token::TokenInfo;
 
     /// Build a QuoteStore backed by a unique temp directory.
     fn temp_store() -> (QuoteStore, PathBuf) {
@@ -182,6 +243,25 @@ mod tests {
             raw_dodo_response: serde_json::json!({}),
             chain_id: 1,
             slippage: 1.0,
+        }
+    }
+
+    fn make_custom_token_info(
+        chain_id: u64,
+        address: &str,
+        symbol: &str,
+        name: &str,
+        decimals: u8,
+    ) -> TokenInfo {
+        TokenInfo {
+            address: address.to_string(),
+            symbol: symbol.to_string(),
+            name: name.to_string(),
+            decimals,
+            chain_id,
+            total_supply: "0".to_string(),
+            total_supply_display: 0.0,
+            source: "on-chain".to_string(),
         }
     }
 
@@ -322,5 +402,68 @@ mod tests {
 
         let limited = store.load_history(3).unwrap();
         assert_eq!(limited.len(), 3);
+    }
+
+    #[test]
+    fn custom_token_roundtrip_and_latest_symbol_wins() {
+        let (store, _dir) = temp_store();
+
+        let older = make_custom_token_info(
+            1,
+            "0x1111111111111111111111111111111111111111",
+            "USDC",
+            "USD Coin Old",
+            6,
+        );
+        let newer = make_custom_token_info(
+            1,
+            "0x2222222222222222222222222222222222222222",
+            "USDC",
+            "USD Coin New",
+            6,
+        );
+
+        store.save_custom_token_info(&older).unwrap();
+        store.save_custom_token_info(&newer).unwrap();
+
+        let resolved = store
+            .find_custom_token_by_symbol(1, "usdc")
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.address, newer.address);
+        assert_eq!(resolved.symbol, "USDC");
+        assert_eq!(resolved.decimals, 6);
+    }
+
+    #[test]
+    fn custom_token_upsert_replaces_same_address() {
+        let (store, _dir) = temp_store();
+        let first = make_custom_token_info(
+            1,
+            "0x3333333333333333333333333333333333333333",
+            "ABC",
+            "Token ABC",
+            18,
+        );
+        let second = make_custom_token_info(
+            1,
+            "0x3333333333333333333333333333333333333333",
+            "ABCD",
+            "Token ABCD",
+            18,
+        );
+
+        store.save_custom_token_info(&first).unwrap();
+        store.save_custom_token_info(&second).unwrap();
+
+        assert!(store
+            .find_custom_token_by_symbol(1, "ABC")
+            .unwrap()
+            .is_none());
+        let updated = store
+            .find_custom_token_by_symbol(1, "ABCD")
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.address, second.address);
     }
 }

@@ -135,6 +135,11 @@ chainpilot [--chain-id <N>] swap quote --from <TOKEN> --to <TOKEN> --amount <AMO
 
 Returns a `quote_id` to pass to subsequent commands.
 
+If the user passes a token address in `--from` or `--to` and the quote succeeds,
+the CLI automatically persists that token's metadata locally. Future symbol
+lookups can fall back to this local store when the DODO tokenlist does not have
+the symbol.
+
 **Token not found handling**: If `chainpilot swap quote` returns an error indicating
 the token symbol was not found, use the Coingecko API to search for the token's
 contract address on the target chain:
@@ -247,6 +252,16 @@ chainpilot [--chain-id <N>] token contract <TOKEN>
 
 On-chain contract details: proxy, owner, implementation address.
 
+### `token add`
+
+```bash
+chainpilot [--chain-id <N>] token add <TOKEN_ADDRESS>
+```
+
+Fetch the token metadata on-chain and save it to the local custom token store.
+Use this when a token symbol is missing from the DODO tokenlist but the user
+already knows the contract address.
+
 ---
 
 ## `wallet` Subcommands
@@ -296,7 +311,7 @@ Tokens can be a symbol or a `0x` address. Resolution order:
 1. Native token symbol (`ETH`, `BNB`, etc.)
 2. Raw `0x` address — decimals fetched on-chain
 3. DODO tokenlist cache (1-hour TTL)
-4. On-chain ERC-20 fallback
+4. Local custom token store (`token add` and successful address-based quotes)
 
 ---
 

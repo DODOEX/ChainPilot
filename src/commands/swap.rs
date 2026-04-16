@@ -88,7 +88,9 @@ impl QuoteDeps for LiveQuoteDeps<'_> {
         token_addr: Address,
         wallet_addr: Address,
     ) -> BoxFuture<'a, Result<(String, u8)>> {
-        Box::pin(async move { crate::chain::get_balance(self.onchain, token_addr, wallet_addr).await })
+        Box::pin(
+            async move { crate::chain::get_balance(self.onchain, token_addr, wallet_addr).await },
+        )
     }
 
     fn get_allowance<'a>(
@@ -125,7 +127,10 @@ trait ExecuteDeps {
         max_fee_gwei: Option<f64>,
     ) -> BoxFuture<'a, Result<(Address, String)>>;
 
-    fn get_tx_receipt<'a>(&'a self, tx_hash: &'a str) -> BoxFuture<'a, Result<Option<crate::chain::TxStatus>>>;
+    fn get_tx_receipt<'a>(
+        &'a self,
+        tx_hash: &'a str,
+    ) -> BoxFuture<'a, Result<Option<crate::chain::TxStatus>>>;
 }
 
 struct LiveExecuteDeps<'a> {
@@ -141,7 +146,9 @@ impl ExecuteDeps for LiveExecuteDeps<'_> {
         data: &'a str,
         value: &'a str,
     ) -> BoxFuture<'a, Result<u64>> {
-        Box::pin(async move { crate::chain::estimate_gas(self.onchain, from, to, data, value).await })
+        Box::pin(
+            async move { crate::chain::estimate_gas(self.onchain, from, to, data, value).await },
+        )
     }
 
     fn get_nonce<'a>(&'a self, address: Address) -> BoxFuture<'a, Result<u64>> {
@@ -250,8 +257,8 @@ async fn quote(
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_onchain;
 
-    let from_token = resolve_token(&args.from, chain_id, onchain, api, config).await?;
-    let to_token = resolve_token(&args.to, chain_id, onchain, api, config).await?;
+    let from_token = resolve_token(&args.from, chain_id, onchain, api, config, store).await?;
+    let to_token = resolve_token(&args.to, chain_id, onchain, api, config, store).await?;
     let user_addr = match config.wallet_address.as_deref() {
         Some(addr) => match addr.parse::<Address>() {
             Ok(parsed) => parsed.to_string(),
@@ -274,6 +281,7 @@ async fn quote(
     let quote =
         fetch_quote_with_fallback(&deps, &req, &from_token, &to_token, &user_addr, config).await?;
     store.save_quote(&quote)?;
+    record_custom_tokens_from_quote_inputs(&args, &quote, onchain, store).await;
 
     Ok(crate::output::print_output::<crate::models::quote::Quote>(
         Ok(quote),
@@ -281,6 +289,45 @@ async fn quote(
         output_mode,
         OutputContext::new(chain_id, false),
     ))
+}
+
+async fn record_custom_tokens_from_quote_inputs(
+    args: &QuoteArgs,
+    quote: &Quote,
+    onchain: &OnChainClient,
+    store: &QuoteStore,
+) {
+    for (input, token) in [(&args.from, &quote.from_token), (&args.to, &quote.to_token)] {
+        if input.parse::<Address>().is_err()
+            || token
+                .address
+                .eq_ignore_ascii_case(crate::config::chains::NATIVE_ADDR)
+        {
+            continue;
+        }
+
+        let token_addr = match token.address.parse::<Address>() {
+            Ok(addr) => addr,
+            Err(_) => continue,
+        };
+
+        match crate::chain::get_token_info(onchain, token_addr).await {
+            Ok(info) => {
+                if let Err(err) = store.save_custom_token_info(&info) {
+                    eprintln!(
+                        "Warning: failed to persist custom token {} on chain {}: {}",
+                        info.address, info.chain_id, err
+                    );
+                }
+            }
+            Err(err) => {
+                eprintln!(
+                    "Warning: failed to fetch token metadata for {} on chain {}: {}",
+                    token.address, token.chain_id, err
+                );
+            }
+        }
+    }
 }
 
 async fn fetch_quote_with_fallback<D: QuoteDeps>(
@@ -349,7 +396,8 @@ async fn fetch_quote_with_fallback<D: QuoteDeps>(
                         .map_err(|_| {
                             ChainError::InvalidAddress(chain_cfg.contracts.dodo_approve.to_string())
                         })?;
-                    let allowance_raw = deps.get_allowance(token_addr, wallet_addr, spender).await?;
+                    let allowance_raw =
+                        deps.get_allowance(token_addr, wallet_addr, spender).await?;
                     let allowance: u128 = allowance_raw.parse().unwrap_or(0);
                     if allowance < need_raw {
                         return Err(ChainError::NotApproved {
@@ -861,11 +909,7 @@ async fn execute_quote_with_deps<D: ExecuteDeps>(
     })
 }
 
-async fn status(
-    args: StatusArgs,
-    config: &AppConfig,
-    output_mode: OutputMode,
-) -> Result<ExitCode> {
+async fn status(args: StatusArgs, config: &AppConfig, output_mode: OutputMode) -> Result<ExitCode> {
     let chain_id = config.chain_id;
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     match crate::chain::get_tx_receipt(&chain_onchain, &args.tx_hash).await {
@@ -876,7 +920,9 @@ async fn status(
             OutputContext::new(chain_id, false),
         )),
         Ok(None) => Ok(crate::output::print_output::<crate::chain::TxStatus>(
-            Err(ChainError::Config("Transaction not found or pending".to_string())),
+            Err(ChainError::Config(
+                "Transaction not found or pending".to_string(),
+            )),
             "swap.status",
             output_mode,
             OutputContext::new(chain_id, false),
@@ -934,7 +980,10 @@ async fn approve(
         None => None,
     };
 
-    let chain_id = quote.as_ref().map(|q| q.chain_id).unwrap_or(config.chain_id);
+    let chain_id = quote
+        .as_ref()
+        .map(|q| q.chain_id)
+        .unwrap_or(config.chain_id);
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
     let chain_rpc = config.rpc_url_for_chain(chain_id);
@@ -1023,7 +1072,9 @@ async fn approve(
     }
 
     match send_approval_with_deps(
-        &LiveApprovalDeps { chain_rpc: &chain_rpc },
+        &LiveApprovalDeps {
+            chain_rpc: &chain_rpc,
+        },
         chain_id,
         signer.unwrap(),
         token_addr,
@@ -1048,11 +1099,7 @@ async fn approve(
     }
 }
 
-async fn revoke(
-    args: RevokeArgs,
-    config: &AppConfig,
-    output_mode: OutputMode,
-) -> Result<ExitCode> {
+async fn revoke(args: RevokeArgs, config: &AppConfig, output_mode: OutputMode) -> Result<ExitCode> {
     use crate::models::swap::ApprovalResult;
     use alloy::primitives::Address;
 
@@ -1125,7 +1172,9 @@ async fn revoke(
         ));
     }
     match send_approval_with_deps(
-        &LiveApprovalDeps { chain_rpc: &chain_rpc },
+        &LiveApprovalDeps {
+            chain_rpc: &chain_rpc,
+        },
         chain_id,
         signer.unwrap(),
         token_addr,
@@ -1422,10 +1471,7 @@ mod tests {
         let to_token = erc20_token(chain_id);
         let wallet = "0x1111111111111111111111111111111111111111";
 
-        for case in [
-            ("0", "ETH"),
-            ("999999999999999999", "ETH"),
-        ] {
+        for case in [("0", "ETH"), ("999999999999999999", "ETH")] {
             let deps = MockQuoteDeps {
                 route_results: RefCell::new(vec![Err(ChainError::DodoApi {
                     code: 500,
@@ -1750,7 +1796,10 @@ mod tests {
         assert!(matches!(result.status, ExecutionStatus::Submitted));
         assert_eq!(result.tx_hash.as_deref(), Some("0xabc"));
         let expected_from_str = expected_from.to_string();
-        assert_eq!(result.from_address.as_deref(), Some(expected_from_str.as_str()));
+        assert_eq!(
+            result.from_address.as_deref(),
+            Some(expected_from_str.as_str())
+        );
     }
 
     #[test]
@@ -1759,9 +1808,17 @@ mod tests {
         let explicit_token = "0x2222222222222222222222222222222222222222";
         let explicit_spender = "0x3333333333333333333333333333333333333333";
 
-        let resolved = resolve_approve_targets(Some(explicit_token), Some(&quote), Some(explicit_spender), 1)
-            .unwrap();
-        assert_eq!(resolved, (explicit_token.to_string(), explicit_spender.to_string()));
+        let resolved = resolve_approve_targets(
+            Some(explicit_token),
+            Some(&quote),
+            Some(explicit_spender),
+            1,
+        )
+        .unwrap();
+        assert_eq!(
+            resolved,
+            (explicit_token.to_string(), explicit_spender.to_string())
+        );
 
         let fallback = resolve_approve_targets(None, Some(&quote), None, 1).unwrap();
         assert_eq!(fallback.0, quote.from_token.address);
@@ -1782,7 +1839,8 @@ mod tests {
         let quote = sample_quote_for_approve(42161);
         let effective_chain_id = quote.chain_id;
 
-        let resolved = resolve_approve_targets(None, Some(&quote), None, effective_chain_id).unwrap();
+        let resolved =
+            resolve_approve_targets(None, Some(&quote), None, effective_chain_id).unwrap();
         assert_eq!(effective_chain_id, 42161);
         assert_eq!(resolved.0, quote.from_token.address);
         assert!(resolved.1.starts_with("0x"));
@@ -1790,7 +1848,9 @@ mod tests {
 
     #[test]
     fn calldata_builders_encode_expected_selector() {
-        let spender: Address = "0x1111111111111111111111111111111111111111".parse().unwrap();
+        let spender: Address = "0x1111111111111111111111111111111111111111"
+            .parse()
+            .unwrap();
         let approve = approve_calldata(spender, alloy::primitives::U256::from(42u64));
         let revoke = revoke_calldata(spender);
         assert!(approve.starts_with("0x095ea7b3"));
@@ -1820,8 +1880,12 @@ mod tests {
         let deps = MockApprovalDeps {
             send_tx_result: Ok((expected_from, "0xapprove".to_string())),
         };
-        let token: Address = "0x2222222222222222222222222222222222222222".parse().unwrap();
-        let spender: Address = "0x3333333333333333333333333333333333333333".parse().unwrap();
+        let token: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
+        let spender: Address = "0x3333333333333333333333333333333333333333"
+            .parse()
+            .unwrap();
         let result = send_approval_with_deps(
             &deps,
             1,
@@ -1836,6 +1900,9 @@ mod tests {
 
         assert!(!result.dry_run);
         assert_eq!(result.tx_hash.as_deref(), Some("0xapprove"));
-        assert_eq!(result.from_address.as_deref(), Some(expected_from.to_string().as_str()));
+        assert_eq!(
+            result.from_address.as_deref(),
+            Some(expected_from.to_string().as_str())
+        );
     }
 }

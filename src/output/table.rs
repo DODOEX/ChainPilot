@@ -200,6 +200,24 @@ impl TableRenderable for crate::models::token::TokenInfo {
     }
 }
 
+impl TableRenderable for crate::models::token::CustomTokenRecord {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Address", &self.address]);
+        table.add_row(vec!["Symbol", &self.symbol]);
+        table.add_row(vec!["Name", &self.name]);
+        table.add_row(vec!["Decimals", &self.decimals.to_string()]);
+        table.add_row(vec!["Chain ID", &self.chain_id.to_string()]);
+        table.add_row(vec!["Source", &self.source]);
+        table.add_row(vec![
+            "Added At",
+            &self.added_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        ]);
+        println!("{}", table);
+    }
+}
+
 impl TableRenderable for crate::models::wallet::WalletBalance {
     fn render_table(&self) {
         let mut table = Table::new();
@@ -325,7 +343,10 @@ mod tests {
             ("", 18, None),
             ("-1", 18, None),
         ] {
-            assert_eq!(raw_to_decimal_string(raw, decimals), expected.map(str::to_string));
+            assert_eq!(
+                raw_to_decimal_string(raw, decimals),
+                expected.map(str::to_string)
+            );
         }
     }
 

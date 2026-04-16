@@ -64,9 +64,11 @@ impl AppConfig {
         let private_key = std::env::var("PRIVATE_KEY").ok();
         let keystore_path = std::env::var("KEYSTORE_PATH").ok();
         let keystore_password_file = std::env::var("KEYSTORE_PASSWORD_FILE").ok();
-        let keystore_password_env = std::env::var("KEYSTORE_PASSWORD_ENV")
-            .ok()
-            .or_else(|| std::env::var(DEFAULT_KEYSTORE_PASSWORD_ENV).ok().map(|_| DEFAULT_KEYSTORE_PASSWORD_ENV.to_string()));
+        let keystore_password_env = std::env::var("KEYSTORE_PASSWORD_ENV").ok().or_else(|| {
+            std::env::var(DEFAULT_KEYSTORE_PASSWORD_ENV)
+                .ok()
+                .map(|_| DEFAULT_KEYSTORE_PASSWORD_ENV.to_string())
+        });
         let wallet_address = std::env::var("WALLET_ADDRESS").ok();
 
         let data_dir = dirs::data_local_dir()
@@ -142,6 +144,9 @@ impl AppConfig {
         self.data_dir.join("tokenlist_cache.json")
     }
 
+    pub fn custom_tokens_path(&self) -> PathBuf {
+        self.data_dir.join("custom_tokens.json")
+    }
 }
 
 #[cfg(test)]
@@ -338,7 +343,9 @@ mod tests {
             let cfg = AppConfig::load().unwrap();
             assert!(cfg.quotes_dir().ends_with("chain/quotes"));
             assert!(cfg.history_dir().ends_with("chain/history"));
-            assert!(cfg.tokenlist_cache_path().ends_with("chain/tokenlist_cache.json"));
+            assert!(cfg
+                .tokenlist_cache_path()
+                .ends_with("chain/tokenlist_cache.json"));
         });
     }
 

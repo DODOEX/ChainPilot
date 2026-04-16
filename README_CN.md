@@ -93,7 +93,13 @@ RUST_LOG=debug chainpilot ...
 1. 原生代币符号（如 `ETH`、`BNB`）
 2. 原始 `0x` 地址 — 链上获取精度
 3. DODO 代币列表缓存（1 小时 TTL）
-4. 链上 ERC-20 回退
+4. 本地自定义 token 存储（`token add` 和 address 询价成功后自动记录）
+
+自定义 token 行为：
+
+- 可通过 `chainpilot [--chain-id <N>] token add <0xTOKEN>` 手动保存 token
+- 如果用户在 `swap quote` 里直接把 `--from` 或 `--to` 传成 token address，且询价成功，CLI 会自动把该 token 的元数据写入本地
+- 后续按 symbol 查询时，如果 DODO tokenlist 里没有，会回退到这份本地记录
 
 ## 支持的链
 
@@ -249,6 +255,10 @@ chainpilot token info 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 # 链上合约详情：代理、所有者、实现地址
 chainpilot token contract USDC
 chainpilot --chain-id 137 token contract USDC
+
+# 本地保存自定义 token，供后续按 symbol 解析
+chainpilot token add 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+chainpilot --chain-id 8453 token add 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 ```
 
 ### Wallet（钱包）

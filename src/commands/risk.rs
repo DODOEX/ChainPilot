@@ -15,14 +15,14 @@ use crate::store::QuoteStore;
 pub async fn handle(
     cmd: RiskCmd,
     config: &AppConfig,
-    _store: &QuoteStore,
+    store: &QuoteStore,
     api: &ApiClients,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     match cmd.action {
-        RiskAction::Token(args) => token_risk(args, api, config, output_mode).await,
+        RiskAction::Token(args) => token_risk(args, api, config, store, output_mode).await,
         RiskAction::Wallet(args) => wallet_risk(args, config, output_mode).await,
-        RiskAction::Approval(args) => approval_risk(args, api, config, output_mode).await,
+        RiskAction::Approval(args) => approval_risk(args, api, config, store, output_mode).await,
     }
 }
 
@@ -30,12 +30,13 @@ async fn token_risk(
     args: crate::cli::risk::TokenRiskArgs,
     api: &ApiClients,
     config: &AppConfig,
+    store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
-    let token_ref = match resolve_token(&args.token, chain_id, onchain, api, config).await {
+    let token_ref = match resolve_token(&args.token, chain_id, onchain, api, config, store).await {
         Ok(t) => t,
         Err(e) => {
             return Ok(crate::output::print_output::<RiskReport>(
@@ -179,6 +180,7 @@ async fn approval_risk(
     args: crate::cli::risk::ApprovalRiskArgs,
     api: &ApiClients,
     config: &AppConfig,
+    store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     let chain_id = config.chain_id;
@@ -207,7 +209,7 @@ async fn approval_risk(
         }
     };
 
-    let token_ref = match resolve_token(&args.token, chain_id, onchain, api, config).await {
+    let token_ref = match resolve_token(&args.token, chain_id, onchain, api, config, store).await {
         Ok(t) => t,
         Err(e) => {
             return Ok(crate::output::print_output::<ApprovalRisk>(

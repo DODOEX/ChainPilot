@@ -93,7 +93,13 @@ Tokens can be specified as a symbol (`ETH`, `USDC`) or a `0x` contract address. 
 1. Native token symbol (e.g. `ETH`, `BNB`)
 2. Raw `0x` address — decimals fetched on-chain
 3. DODO tokenlist cache (1-hour TTL)
-4. On-chain ERC-20 fallback
+4. Custom token store (`token add` and successful address-based quotes)
+
+Custom token behavior:
+
+- Save a token manually with `chainpilot [--chain-id <N>] token add <0xTOKEN>`
+- If a user gets a successful quote using a token address in `--from` or `--to`, the CLI automatically saves that token's metadata locally
+- Later symbol lookups fall back to this local store when the DODO tokenlist does not contain the symbol
 
 ## Supported Chains
 
@@ -249,6 +255,10 @@ chainpilot token info 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 # On-chain contract details: proxy, owner, implementation
 chainpilot token contract USDC
 chainpilot --chain-id 137 token contract USDC
+
+# Save a custom token locally for later symbol resolution
+chainpilot token add 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
+chainpilot --chain-id 8453 token add 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 ```
 
 ### Wallet

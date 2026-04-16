@@ -39,6 +39,7 @@ pub async fn resolve_token(
     onchain: &OnChainClient,
     api: &ApiClients,
     config: &crate::config::AppConfig,
+    store: &QuoteStore,
 ) -> Result<crate::models::quote::TokenRef> {
     use alloy::primitives::Address;
 
@@ -103,6 +104,11 @@ pub async fn resolve_token(
         return Ok(token);
     }
 
+    // 4. Custom token store fallback when tokenlist does not contain the symbol.
+    if let Some(token) = store.find_custom_token_by_symbol(chain_id, &upper)? {
+        return Ok(token);
+    }
+
     Err(crate::error::ChainError::TokenNotFound(input.to_string()).into())
 }
 
@@ -116,10 +122,9 @@ pub fn parse_display_amount(amount: &str) -> Result<f64> {
 pub fn to_raw_amount(amount: &str, decimals: u8) -> Result<String> {
     let amount = amount.trim();
     if amount.is_empty() {
-        return Err(crate::error::ChainError::InvalidAmount(
-            "amount cannot be empty".to_string(),
-        )
-        .into());
+        return Err(
+            crate::error::ChainError::InvalidAmount("amount cannot be empty".to_string()).into(),
+        );
     }
     if amount.starts_with('-') {
         return Err(crate::error::ChainError::InvalidAmount(
@@ -151,11 +156,19 @@ pub fn to_raw_amount(amount: &str, decimals: u8) -> Result<String> {
     let frac_padded = format!("{:0<width$}", frac_part, width = decimals as usize);
     let combined = format!(
         "{}{}",
-        if int_normalized.is_empty() { "0" } else { int_normalized },
+        if int_normalized.is_empty() {
+            "0"
+        } else {
+            int_normalized
+        },
         frac_padded
     );
     let normalized = combined.trim_start_matches('0');
-    let raw = if normalized.is_empty() { "0" } else { normalized };
+    let raw = if normalized.is_empty() {
+        "0"
+    } else {
+        normalized
+    };
     raw.parse::<u128>()
         .map_err(|_| crate::error::ChainError::InvalidAmount(amount.to_string()))?;
     Ok(raw.to_string())

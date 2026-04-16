@@ -14,12 +14,12 @@ use crate::store::QuoteStore;
 pub async fn handle(
     cmd: WalletCmd,
     config: &AppConfig,
-    _store: &QuoteStore,
+    store: &QuoteStore,
     api: &ApiClients,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     match cmd.action {
-        WalletAction::Balance(args) => balance(args, api, config, output_mode).await,
+        WalletAction::Balance(args) => balance(args, api, config, store, output_mode).await,
     }
 }
 
@@ -27,6 +27,7 @@ async fn balance(
     args: BalanceArgs,
     api: &ApiClients,
     config: &AppConfig,
+    store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
     let chain_id = config.chain_id;
@@ -66,6 +67,7 @@ async fn balance(
                 onchain,
                 api,
                 config,
+                store,
             )
             .await
             {
