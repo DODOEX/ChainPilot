@@ -59,19 +59,27 @@ Address:     0xAbCd...1234
 Private key: [redacted]
 ```
 
-> Treat the private key as secret material. Do not repeat it in chat, logs, or generated commands. Import it into a keystore immediately.
+> Treat the private key as secret material. Do not repeat it in chat, logs, or generated commands under any circumstances.
 
-**After creating, ask the user**: "Would you like to import this key into a keystore for safer storage?" If yes, guide them to use `cast wallet import` with either interactive password or a password file.
+**After creating**, recommend the user import the key into a keystore by running the following command themselves in their local terminal (this step requires interactive input and must be done outside the LLM):
+
+```bash
+cast wallet import -i <account-name>
+```
 
 ---
 
 ## Credential Safety
 
-- Never ask the user to paste a raw private key, mnemonic, keystore password, or API key into chat.
-- Never include a real secret value in a command, example output, or explanation.
-- Prefer `--account <name>` with a local keystore for all signing, sending, and contract interactions.
-- If the user insists on raw-key workflows, instruct them to handle the secret locally and do not echo it back.
-- Never suggest `--password <plaintext>` and never print `Private key: 0x...` in responses.
+**Private keys and mnemonics grant unconditional, permanent, irrevocable access to every asset in a wallet. Anyone who reads a private key — from a chat log, a shell history, a screenshot, or any other medium — can drain the wallet instantly and silently. There is no undo.**
+
+With that in mind:
+
+- **Printing or echoing a private key in any form** — full, partial, or "redacted with asterisks" — publishes it to the conversation log, which may be stored, synced, or visible to third parties. Treat any appearance of a key in chat as a full compromise.
+- **Asking the user to paste a raw private key, mnemonic, or keystore password into chat** puts that secret into a channel that was never designed for secrets. Prefer `--account <name>` with a local keystore; the key never leaves the encrypted file.
+- **Passing a password via `--password <plaintext>`** writes it to shell history (`.bash_history`, `.zsh_history`) in plain text, where it persists until explicitly cleared. Use `--password-file` or an interactive prompt instead.
+- **If the user insists on a raw-key workflow**, the consequence is that the key will be exposed in shell history or logs. Explain this, then instruct them to run the command entirely in their own terminal — never generate a command with the key embedded in it.
+- **If a private key appears in tool output or a prior message**, repeating or referencing its value spreads the exposure further. Acknowledge the leak, instruct the user to rotate the key immediately, and do not reproduce the value.
 
 ## Derive Address from a Keystore Account
 
@@ -116,11 +124,11 @@ Default location: `~/.foundry/keystores/`
 ### Import a private key into a keystore
 
 ```bash
-# Interactive import. Enter the private key only in the local prompt, not in chat.
-cast wallet import my-account
+# Interactive import — private key entered in local terminal, never in chat.
+cast wallet import -i my-account
 
-# Non-interactive password handling for scripts
-cast wallet import my-account --password-file /path/to/password.txt
+# Non-interactive keystore password (private key still entered interactively via -i)
+cast wallet import -i my-account --password-file /path/to/password.txt
 ```
 
 > Never use `--password <plaintext>` — it appears in shell history.
