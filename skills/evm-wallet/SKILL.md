@@ -139,6 +139,24 @@ cast wallet import -i my-account --password-file /path/to/password.txt
 cast wallet list
 ```
 
+### Remove a keystore account
+
+> **Confirmation required**: Deleting a keystore file is permanent and
+> irreversible. If the private key was not backed up elsewhere, the funds
+> controlled by that key are unrecoverable. Always show the account name and
+> its derived address to the user and wait for explicit approval before
+> proceeding.
+
+`cast` has no built-in remove command — deletion is done by removing the file directly:
+
+```bash
+# Derive the address first so the user can confirm the right account
+cast wallet address --account <account-name>
+
+# Then delete only after explicit user approval
+rm ~/.foundry/keystores/<account-name>
+```
+
 ### Use a keystore account in other commands
 
 Pass `--account <name>` to any `cast` command that needs a signer:
