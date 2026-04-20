@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - '**'
     paths:
       - Cargo.toml
       - .github/workflows/release.yml
@@ -14,6 +15,7 @@ permissions:
 
 env:
   BIN_NAME: chainpilot
+  HOMEBREW_TAP_REPO: DODOEX/homebrew-chainpilot
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -22,39 +24,85 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       should_release: ${{ steps.detect.outputs.should_release }}
+      branch_name: ${{ steps.detect.outputs.branch_name }}
+      cargo_version: ${{ steps.detect.outputs.cargo_version }}
       version: ${{ steps.detect.outputs.version }}
       tag: ${{ steps.detect.outputs.tag }}
       previous_tag: ${{ steps.detect.outputs.previous_tag }}
+      prerelease: ${{ steps.detect.outputs.prerelease }}
+      stable: ${{ steps.detect.outputs.stable }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Detect Cargo version change
+      - name: Validate version and release channel
         id: detect
         shell: bash
         run: |
           set -euo pipefail
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
-          if [[ -z "$version" ]]; then
+
+          branch_name="${GITHUB_REF_NAME}"
+          if [[ -z "$branch_name" ]]; then
+            echo "Missing branch name from GitHub ref" >&2
+            exit 1
+          fi
+
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          if [[ -z "$cargo_version" ]]; then
             echo "Failed to read version from Cargo.toml" >&2
             exit 1
           fi
 
+          version="$cargo_version"
           tag="v$version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          previous_tag=$(git tag --sort=-version:refname | head -n1 || true)
-          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
+          is_main=false
+          if [[ "$branch_name" == "main" ]]; then
+            is_main=true
+          fi
+
+          prerelease=false
+          stable=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          else
+            stable=true
+          fi
+
+          if [[ "$is_main" == "true" && "$prerelease" == "true" ]]; then
+            echo "main branch cannot publish prerelease versions: $version" >&2
+            exit 1
+          fi
+
+          if [[ "$is_main" != "true" && "$stable" == "true" ]]; then
+            echo "non-main branch must use prerelease versions with a suffix: $version" >&2
+            exit 1
+          fi
 
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
             echo "Tag $tag already exists"
             echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "branch_name=$branch_name" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "cargo_version=$cargo_version" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+            echo "stable=$stable" >> "$GITHUB_OUTPUT"
+            previous_tag=$(git tag --sort=-version:refname | head -n1 || true)
+            echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "branch_name=$branch_name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "cargo_version=$cargo_version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+          previous_tag=$(git tag --sort=-version:refname | head -n1 || true)
+          echo "previous_tag=$previous_tag" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.asset_name }}
@@ -182,4 +230,91 @@ jobs:
           tag_name: ${{ needs.prepare-release.outputs.tag }}
           name: ${{ needs.prepare-release.outputs.tag }}
           body: ${{ steps.changelog.outputs.changelog }}
+          prerelease: ${{ needs.prepare-release.outputs.prerelease }}
           files: dist/*
+
+      - name: Checkout Homebrew tap repository
+        if: needs.prepare-release.outputs.stable == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.HOMEBREW_TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        if: needs.prepare-release.outputs.stable == 'true'
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.cargo_version }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          linux_x86_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/chainpilot-linux-x86_64.tar.gz"
+          linux_arm_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/chainpilot-linux-aarch64.tar.gz"
+          macos_x86_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/chainpilot-macos-x86_64.tar.gz"
+          macos_arm_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/chainpilot-macos-aarch64.tar.gz"
+
+          linux_x86_sha=$(sha256sum dist/chainpilot-linux-x86_64.tar.gz | awk '{print $1}')
+          linux_arm_sha=$(sha256sum dist/chainpilot-linux-aarch64.tar.gz | awk '{print $1}')
+          macos_x86_sha=$(sha256sum dist/chainpilot-macos-x86_64.tar.gz | awk '{print $1}')
+          macos_arm_sha=$(sha256sum dist/chainpilot-macos-aarch64.tar.gz | awk '{print $1}')
+
+          mkdir -p homebrew-tap/Formula
+          cat > homebrew-tap/Formula/chainpilot.rb <<EOF
+          class Chainpilot < Formula
+            desc "CLI tool for on-chain DeFi operations on EVM-compatible networks"
+            homepage "https://github.com/${GITHUB_REPOSITORY}"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "${macos_arm_url}"
+                sha256 "${macos_arm_sha}"
+              end
+
+              on_intel do
+                url "${macos_x86_url}"
+                sha256 "${macos_x86_sha}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "${linux_arm_url}"
+                sha256 "${linux_arm_sha}"
+              end
+
+              on_intel do
+                url "${linux_x86_url}"
+                sha256 "${linux_x86_sha}"
+              end
+            end
+
+            def install
+              bin.install "chainpilot"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/chainpilot --version")
+            end
+          end
+          EOF
+
+      - name: Commit and push Homebrew formula update
+        if: needs.prepare-release.outputs.stable == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd homebrew-tap
+          if git diff --quiet; then
+            echo "No Homebrew formula changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/chainpilot.rb
+          git commit -m "chainpilot ${{ needs.prepare-release.outputs.version }}"
+          git push origin HEAD

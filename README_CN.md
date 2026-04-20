@@ -17,6 +17,17 @@
 
 ## 安装
 
+**Homebrew（macOS / Linux）：**
+```bash
+brew tap DODOEX/chainpilot
+brew install chainpilot
+```
+
+**AUR（Arch Linux）：**
+```bash
+yay -S chainpilot-bin
+```
+
 **Linux / macOS（推荐）：**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/install.sh | bash 2>&1
