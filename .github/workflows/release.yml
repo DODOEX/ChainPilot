@@ -14,6 +14,7 @@ permissions:
 
 env:
   BIN_NAME: chainpilot
+  HOMEBREW_TAP_REPO: DODOEX/homebrew-chainpilot
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -183,3 +184,86 @@ jobs:
           name: ${{ needs.prepare-release.outputs.tag }}
           body: ${{ steps.changelog.outputs.changelog }}
           files: dist/*
+
+      - name: Checkout Homebrew tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.HOMEBREW_TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          linux_x86_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/chainpilot-linux-x86_64.tar.gz"
+          linux_arm_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/chainpilot-linux-aarch64.tar.gz"
+          macos_x86_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/chainpilot-macos-x86_64.tar.gz"
+          macos_arm_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/chainpilot-macos-aarch64.tar.gz"
+
+          linux_x86_sha=$(sha256sum dist/chainpilot-linux-x86_64.tar.gz | awk '{print $1}')
+          linux_arm_sha=$(sha256sum dist/chainpilot-linux-aarch64.tar.gz | awk '{print $1}')
+          macos_x86_sha=$(sha256sum dist/chainpilot-macos-x86_64.tar.gz | awk '{print $1}')
+          macos_arm_sha=$(sha256sum dist/chainpilot-macos-aarch64.tar.gz | awk '{print $1}')
+
+          mkdir -p homebrew-tap/Formula
+          cat > homebrew-tap/Formula/chainpilot.rb <<EOF
+          class Chainpilot < Formula
+            desc "CLI tool for on-chain DeFi operations on EVM-compatible networks"
+            homepage "https://github.com/${GITHUB_REPOSITORY}"
+            version "${VERSION}"
+            license "MIT"
+
+            on_macos do
+              on_arm do
+                url "${macos_arm_url}"
+                sha256 "${macos_arm_sha}"
+              end
+
+              on_intel do
+                url "${macos_x86_url}"
+                sha256 "${macos_x86_sha}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "${linux_arm_url}"
+                sha256 "${linux_arm_sha}"
+              end
+
+              on_intel do
+                url "${linux_x86_url}"
+                sha256 "${linux_x86_sha}"
+              end
+            end
+
+            def install
+              bin.install "chainpilot"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/chainpilot --version")
+            end
+          end
+          EOF
+
+      - name: Commit and push Homebrew formula update
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd homebrew-tap
+          if git diff --quiet; then
+            echo "No Homebrew formula changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/chainpilot.rb
+          git commit -m "chainpilot ${{ needs.prepare-release.outputs.version }}"
+          git push origin HEAD
