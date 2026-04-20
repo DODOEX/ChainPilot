@@ -10,6 +10,7 @@ pub static CONFIG: ChainConfig = ChainConfig {
     ],
     contracts: ChainContracts {
         dodo_approve: "0x6D310348d5c12009854DFCf72e0DF9027e8cb4f4",
+        erc20_v3_factory: Some("0x5258Db198f6E39889bfCA6016786AF562Ab8bE91"),
     },
     native_token: NativeToken {
         symbol: "MATIC",

@@ -6,6 +6,7 @@ pub static CONFIG: ChainConfig = ChainConfig {
     rpc_urls: &["https://rpc.mainnet.taiko.xyz"],
     contracts: ChainContracts {
         dodo_approve: "0x2629E610dB4AC081c108cCDf8b19ED39D702df43",
+        erc20_v3_factory: Some("0x4A81Aa47722E1cF27A8726F247E68a766bE58d8e"),
     },
     native_token: NativeToken {
         symbol: "ETH",

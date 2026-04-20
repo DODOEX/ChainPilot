@@ -6,6 +6,7 @@ pub static CONFIG: ChainConfig = ChainConfig {
     rpc_urls: &["https://phoenix-rpc.plumenetwork.xyz"],
     contracts: ChainContracts {
         dodo_approve: "0x5977F12664b4E634dFbAAD0ad4a6a81057254dA8",
+        erc20_v3_factory: None,
     },
     native_token: NativeToken {
         symbol: "PLUME",

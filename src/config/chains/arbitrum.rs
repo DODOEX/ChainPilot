@@ -9,6 +9,7 @@ pub static CONFIG: ChainConfig = ChainConfig {
     ],
     contracts: ChainContracts {
         dodo_approve: "0xA867241cDC8d3b0C07C85cC06F25a0cD3b5474d8",
+        erc20_v3_factory: Some("0x5CA5e03228a3C16EF262d29E588Adb6c2445fDbC"),
     },
     native_token: NativeToken {
         symbol: "ETH",

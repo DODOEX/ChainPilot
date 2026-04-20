@@ -2,7 +2,7 @@
 
 use alloy::primitives::{Address, U256};
 use alloy::providers::Provider;
-use alloy_sol_types::sol;
+use alloy_sol_types::{sol, SolCall};
 
 use crate::chain::OnChainClient;
 use crate::error::{ChainError, Result};
@@ -17,12 +17,14 @@ sol! {
         function totalSupply() external view returns (uint256);
         function balanceOf(address owner) external view returns (uint256);
         function allowance(address owner, address spender) external view returns (uint256);
+        function mint(address to, uint256 amount) external;
     }
 
     #[sol(rpc)]
     contract Ownable {
         function owner() external view returns (address);
         function getOwner() external view returns (address);
+        function abandonOwnership(address zeroAddress) external;
     }
 }
 
@@ -111,6 +113,18 @@ pub async fn get_allowance(
         .map_err(|e| ChainError::Rpc(format!("allowance failed: {:?}", e)))?;
 
     Ok(allowance.to_string())
+}
+
+pub fn encode_mint_calldata(to: Address, amount: U256) -> String {
+    let call = ERC20::mintCall { to, amount };
+    format!("0x{}", hex::encode(call.abi_encode()))
+}
+
+pub fn encode_abandon_ownership_calldata() -> String {
+    let call = Ownable::abandonOwnershipCall {
+        zeroAddress: Address::ZERO,
+    };
+    format!("0x{}", hex::encode(call.abi_encode()))
 }
 
 pub async fn inspect_token_contract(
