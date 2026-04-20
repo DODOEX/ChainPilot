@@ -15,13 +15,13 @@ env:
 jobs:
   update-aur:
     name: Update AUR Package
-    if: ${{ !github.event.release.prerelease && !github.event.release.draft && secrets.AUR_SSH_PRIVATE_KEY != '' }}
+    env:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    if: ${{ !github.event.release.prerelease && !github.event.release.draft && env.AUR_SSH_PRIVATE_KEY != '' }}
     runs-on: ubuntu-24.04
     steps:
       - name: Install SSH key for AUR
         shell: bash
-        env:
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -48,41 +48,41 @@ jobs:
           url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/chainpilot-linux-x86_64.tar.gz"
           sha256="$(curl -fsSL "$url" | sha256sum | awk '{print $1}')"
 
-          cat > aur-repo/PKGBUILD <<EOF
-          # Maintainer: DODOEX <maintainers@dodoex.io>
+          {
+            printf '%s\n' '# Maintainer: DODOEX <maintainers@dodoex.io>'
+            printf '\n'
+            printf '%s\n' 'pkgname=chainpilot-bin'
+            printf '%s\n' "pkgver=${version}"
+            printf '%s\n' 'pkgrel=1'
+            printf '%s\n' 'pkgdesc="CLI tool for on-chain DeFi operations on EVM-compatible networks"'
+            printf '%s\n' "url=\"https://github.com/${GITHUB_REPOSITORY}\""
+            printf '%s\n' "source=(\"\$pkgname-\$pkgver.tar.gz::https://github.com/${GITHUB_REPOSITORY}/releases/download/v\$pkgver/chainpilot-linux-x86_64.tar.gz\")"
+            printf '%s\n' 'arch=('\''x86_64'\'')'
+            printf '%s\n' 'license=('\''MIT'\'')'
+            printf '%s\n' 'provides=('\''chainpilot'\'')'
+            printf '%s\n' 'conflicts=('\''chainpilot'\'')'
+            printf '%s\n' "sha256sums=('${sha256}')"
+            printf '\n'
+            printf '%s\n' 'package() {'
+            printf '%s\n' '  install -Dm755 "$srcdir/chainpilot-linux-x86_64/chainpilot" "$pkgdir/usr/bin/chainpilot"'
+            printf '%s\n' '}'
+          } > aur-repo/PKGBUILD
 
-          pkgname=chainpilot-bin
-          pkgver=${version}
-          pkgrel=1
-          pkgdesc="CLI tool for on-chain DeFi operations on EVM-compatible networks"
-          arch=('x86_64')
-          url="https://github.com/${GITHUB_REPOSITORY}"
-          license=('MIT')
-          provides=('chainpilot')
-          conflicts=('chainpilot')
-          source=("\$pkgname-\$pkgver.tar.gz::\$url/releases/download/v\$pkgver/chainpilot-linux-x86_64.tar.gz")
-          sha256sums=('${sha256}')
-
-          package() {
-            install -Dm755 "\$srcdir/chainpilot-linux-x86_64/chainpilot" "\$pkgdir/usr/bin/chainpilot"
-          }
-          EOF
-
-          cat > aur-repo/.SRCINFO <<EOF
-          pkgbase = chainpilot-bin
-          	pkgdesc = CLI tool for on-chain DeFi operations on EVM-compatible networks
-          	pkgver = ${version}
-          	pkgrel = 1
-          	url = https://github.com/${GITHUB_REPOSITORY}
-          	arch = x86_64
-          	license = MIT
-          	conflicts = chainpilot
-          	provides = chainpilot
-          	source = chainpilot-bin-${version}.tar.gz::https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}/chainpilot-linux-x86_64.tar.gz
-          	sha256sums = ${sha256}
-
-          pkgname = chainpilot-bin
-          EOF
+          {
+            printf '%s\n' 'pkgbase = chainpilot-bin'
+            printf '%s\n' '	pkgdesc = CLI tool for on-chain DeFi operations on EVM-compatible networks'
+            printf '%s\n' "	pkgver = ${version}"
+            printf '%s\n' '	pkgrel = 1'
+            printf '%s\n' "	url = https://github.com/${GITHUB_REPOSITORY}"
+            printf '%s\n' '	arch = x86_64'
+            printf '%s\n' '	license = MIT'
+            printf '%s\n' '	conflicts = chainpilot'
+            printf '%s\n' '	provides = chainpilot'
+            printf '%s\n' "	source = chainpilot-bin-${version}.tar.gz::https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}/chainpilot-linux-x86_64.tar.gz"
+            printf '%s\n' "	sha256sums = ${sha256}"
+            printf '\n'
+            printf '%s\n' 'pkgname = chainpilot-bin'
+          } > aur-repo/.SRCINFO
 
       - name: Commit and push AUR update
         shell: bash
