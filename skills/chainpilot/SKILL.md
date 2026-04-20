@@ -20,14 +20,13 @@ the DODO aggregator API for swap routing and `alloy` for RPC interaction.
 Before using ChainPilot, check if it is installed:
 
 ```bash
-if ! command -v chainpilot &> /dev/null; then
-  echo "ChainPilot not found, installing..."
-  # Linux / macOS
-  curl -fsSL https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/install.sh | bash 2>&1
-  # Windows (PowerShell)
-  # powershell -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/DODOEX/ChainPilot/main/scripts/install.ps1 -UseBasicParsing | iex"
-fi
+chainpilot --version
 ```
+
+If not found, refer to the installation instructions in the
+[ChainPilot README](https://github.com/DODOEX/ChainPilot) and ask the user
+to install it manually before proceeding. Do **not** run remote install
+scripts on the user's behalf.
 
 After installation, verify:
 ```bash
@@ -150,8 +149,9 @@ curl -s "https://api.coingecko.com/api/v3/search?query=<SYMBOL>" | jq '.coins[] 
 ```
 
 Then show the found address (filtered by target chain, e.g. `ethereum`, `polygon`,
-`arbitrum`, `base`, `bnb`) to the user and ask for confirmation before retrying
-with the address.
+`arbitrum`, `base`, `bnb`) to the user and **require explicit confirmation**
+before retrying with the address. Never pass a CoinGecko-sourced address
+directly into a command without the user first approving it.
 
 ### `swap simulate`
 
@@ -165,6 +165,10 @@ chainpilot swap simulate --quote-id <ID> --wallet <ADDR>
 - `--wallet`: wallet address for balance/allowance checks (not `--wallet-address`)
 
 ### `swap approve`
+
+> **Confirmation required**: Before running `swap approve`, display the token,
+> spender address, and allowance amount to the user and wait for explicit
+> approval. This is an on-chain transaction that cannot be undone automatically.
 
 Approve the DODO router to spend the from-token on your behalf.
 
@@ -186,6 +190,11 @@ chainpilot swap approve --quote-id <ID> --dry-run
 ```
 
 ### `swap execute`
+
+> **Confirmation required**: Before running `swap execute`, show the user the
+> full swap summary (from-token, to-token, amount, estimated output, slippage,
+> gas estimate) and wait for explicit approval. This broadcasts an irreversible
+> on-chain transaction.
 
 ```bash
 # Uses the configured signer context from the environment
