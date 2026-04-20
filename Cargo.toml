@@ -2,8 +2,13 @@
 name = "chain-pilot"
 version = "0.1.1"
 description = "A CLI tool for on-chain DeFi operations on EVM-compatible networks"
+homepage = "https://github.com/DODOEX/ChainPilot"
+documentation = "https://github.com/DODOEX/ChainPilot#readme"
 license = "MIT"
 repository = "https://github.com/DODOEX/ChainPilot"
+readme = "README.md"
+keywords = ["cli", "evm", "defi", "ethereum", "crypto"]
+categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 edition = "2021"
 
 [[bin]]
