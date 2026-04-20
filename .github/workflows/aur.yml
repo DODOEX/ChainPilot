@@ -15,13 +15,27 @@ env:
 jobs:
   update-aur:
     name: Update AUR Package
-    env:
-      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-    if: ${{ !github.event.release.prerelease && !github.event.release.draft && env.AUR_SSH_PRIVATE_KEY != '' }}
+    if: ${{ !github.event.release.prerelease && !github.event.release.draft }}
     runs-on: ubuntu-24.04
     steps:
-      - name: Install SSH key for AUR
+      - name: Check AUR SSH key
+        id: aur-key
         shell: bash
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [[ -n "${AUR_SSH_PRIVATE_KEY}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "AUR_SSH_PRIVATE_KEY is not configured. Skipping AUR update."
+          fi
+
+      - name: Install SSH key for AUR
+        if: steps.aur-key.outputs.available == 'true'
+        shell: bash
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
@@ -31,6 +45,7 @@ jobs:
           ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
 
       - name: Clone AUR repository
+        if: steps.aur-key.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -38,6 +53,7 @@ jobs:
             git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE_NAME}.git" aur-repo
 
       - name: Update PKGBUILD and .SRCINFO
+        if: steps.aur-key.outputs.available == 'true'
         shell: bash
         env:
           TAG: ${{ github.event.release.tag_name }}
@@ -85,6 +101,7 @@ jobs:
           } > aur-repo/.SRCINFO
 
       - name: Commit and push AUR update
+        if: steps.aur-key.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
