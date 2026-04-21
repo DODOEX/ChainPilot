@@ -93,6 +93,46 @@ Use `--json` and pipe to `jq` for scripting.
 
 ---
 
+## JSON Output Field Reference
+
+When reading `--json` output, some fields are **already human-readable** and others are **raw integers
+in the token's smallest unit**. Never present a raw-integer field directly to the user — convert it
+first or use the matching `*_display` field instead.
+
+### `swap quote` — `Quote` object
+
+| Field | Display-ready? | Notes |
+|---|---|---|
+| `from_amount_display` | ✓ | Always prefer this for display |
+| `from_amount` | ✓ | Same value as `from_amount_display`, stringified |
+| `to_amount_display` | ✓ | Always prefer this for display |
+| `to_amount` | ✓ | Same value as `to_amount_display`, stringified |
+| `to_amount_min` | **✗ raw** | Integer in `to_token.decimals` units — divide by `10^to_token.decimals` to display |
+| `value` | **✗ raw** | Native token value in wei — divide by `1e18` to show as ETH |
+| `exchange_rate` | ✓ | Human-readable ratio |
+| `price_impact_pct` | ✓ | Already a percentage |
+
+### `swap simulate` — `SimulationResult` object
+
+| Field | Display-ready? | Notes |
+|---|---|---|
+| `expected_out` | ✓ | Mirrors `to_amount` — human-readable |
+| `min_out` | **✗ raw** | Same raw integer as `to_amount_min`; divide by `10^to_token.decimals` |
+| `wallet_balance` | **✗ raw** | Integer in from-token's smallest unit |
+| `current_allowance` | **✗ raw** | Integer in from-token's smallest unit |
+| `suggested_approve_amount` | **✗ raw** | Integer in from-token's smallest unit |
+| `total_gas_cost_eth` | ✓ | Already in ETH |
+| `gas_price_gwei` | ✓ | Already in gwei |
+
+**Conversion formula** (when `decimals` is known):
+```
+human_amount = raw_integer / 10^decimals
+```
+The token's decimals are available at `data.to_token.decimals` (quote) or from the quote used for
+the simulation. For native ETH, use `decimals = 18`.
+
+---
+
 ## Typical Swap Workflow
 
 This is the recommended end-to-end flow:
