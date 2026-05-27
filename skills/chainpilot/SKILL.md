@@ -71,9 +71,15 @@ the user explicitly asks for a different one.
 Runtime env vars are intentionally limited to `PRIVATE_KEY`, `KEYSTORE_PATH`,
 `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`,
 `WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`,
-and `DODO_API_URL`.
+`DODO_API_URL`, `COINGECKO_API_URL`, `COINGECKO_API_KEY`, and
+`DEXSCREENER_API_URL`.
 
-Config precedence: CLI flag > env var > `.env` file > compile-time default.
+Runtime config precedence: CLI flag > existing environment variable / `.env` file
+> persistent `config.env` file > compile-time default.
+
+Use `chainpilot config set` for supported API keys instead of asking the user to
+paste secrets into shell commands. `config.env` is stored in ChainPilot's local
+data directory and sensitive values are masked by `config get` / `config list`.
 
 If `--keystore-path` is set, password resolution order is:
 
@@ -182,8 +188,20 @@ lookups can fall back to this local store when the DODO tokenlist does not have
 the symbol.
 
 **Token not found handling**: If `chainpilot swap quote` returns an error indicating
-the token symbol was not found, use the Coingecko API to search for the token's
-contract address on the target chain:
+the token symbol was not found, first try the built-in token search surfaced by
+the metadata commands:
+
+```bash
+chainpilot [--chain-id <N>] token info <SYMBOL>
+```
+
+If candidates are returned, show the candidate address, chain, source, and
+liquidity to the user and require explicit confirmation before retrying the swap
+with an address. Never pass an externally sourced address directly into a swap
+command without the user first approving it.
+
+If the CLI returns no candidates, optionally use the CoinGecko API to search for
+the token's contract address on the target chain:
 
 ```bash
 # Search token address via Coingecko
@@ -192,8 +210,7 @@ curl -s "https://api.coingecko.com/api/v3/search?query=<SYMBOL>" | jq '.coins[] 
 
 Then show the found address (filtered by target chain, e.g. `ethereum`, `polygon`,
 `arbitrum`, `base`, `bnb`) to the user and **require explicit confirmation**
-before retrying with the address. Never pass a CoinGecko-sourced address
-directly into a command without the user first approving it.
+before retrying with the address.
 
 ### `swap simulate`
 
@@ -292,8 +309,12 @@ chainpilot swap history [--limit <N>] [--status pending|success|failed]
 chainpilot [--chain-id <N>] token info <TOKEN>
 ```
 
-ERC-20 metadata: name, symbol, decimals, total supply.
-`<TOKEN>` can be a symbol (`USDC`) or contract address (`0x...`).
+Token metadata from on-chain reads plus external enrichment. Output can include
+name, symbol, decimals, chain, website/social links, price, market cap, FDV,
+liquidity, volume, 24h price change, risk level, and per-field sources.
+`<TOKEN>` can be a symbol (`USDC`), native token symbol (`ETH`), or contract
+address (`0x...`). Unknown symbols may return candidate matches from
+CoinGecko/DexScreener instead of hard failing.
 
 ### `token contract`
 
@@ -366,6 +387,10 @@ no credentials required.
 | `tax_sell` | GoPlus | Sell tax percentage |
 
 Native tokens (ETH, BNB, etc.) return hardcoded low-risk defaults.
+
+Use `token risk` for the current token-specific GoPlus implementation. The
+older top-level `risk token` command remains available but may expose a simpler
+legacy risk shape.
 
 ### `token add`
 
@@ -480,12 +505,16 @@ Single approval state.
 
 ## Token Resolution
 
-Tokens can be a symbol or a `0x` address. Resolution order:
+Tokens can be a symbol, native token symbol, or a `0x` address. Resolution order:
 
 1. Native token symbol (`ETH`, `BNB`, etc.)
 2. Raw `0x` address — decimals fetched on-chain
 3. DODO tokenlist cache (1-hour TTL)
 4. Local custom token store (`token add` and successful address-based quotes)
+
+For `token info`, `token price`, `token liquidity`, and `token risk`, unresolved
+symbols can return external-source candidates. Treat those as suggestions only;
+confirm with the user before using any candidate address in a swap or approval.
 
 ---
 
@@ -518,7 +547,8 @@ For unsupported chain IDs, pass `--rpc-url` manually.
 ## `config` Subcommands
 
 Manage API keys and configuration values. Settings are persisted in a config file
-(`~/.local/share/chain/config.env` on Linux) and take precedence over `.env` file values.
+(`~/.local/share/chain/config.env` on Linux). Existing environment variables and
+`.env` values take precedence over this persisted file at runtime.
 
 ### `config set`
 
@@ -527,7 +557,8 @@ chainpilot config set <KEY> <VALUE>
 ```
 
 Save an API key or configuration value. The value is written to the persistent config file
-and immediately available in the current session.
+and immediately available to the current process. On Unix, the config file is
+written with owner-only permissions (`0600`).
 
 ### `config get`
 
@@ -561,7 +592,12 @@ Remove a configuration key from the config file.
 | `dodo_project_id` | `DODO_PROJECT_ID` | No | DODO project ID for tokenlist API |
 | `coingecko_api_key` | `COINGECKO_API_KEY` | Yes | CoinGecko API key for price data |
 
-**Config precedence**: CLI flag > `config.env` file > env var / `.env` file > compile-time default.
+Only these keys are supported by `chainpilot config` today. Other runtime
+settings, such as `COINGECKO_API_URL` and `DEXSCREENER_API_URL`, can still be
+provided via environment variables or `.env`.
+
+**Runtime config precedence**: CLI flag > existing environment variable / `.env`
+file > `config.env` file > compile-time default.
 
 ---
 
