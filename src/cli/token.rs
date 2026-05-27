@@ -17,6 +17,8 @@ pub enum TokenAction {
     Price(TokenIdentArg),
     /// Liquidity overview: top liquidity, pair count, top pair details (DexScreener)
     Liquidity(TokenIdentArg),
+    /// Token risk analysis: honeypot, blacklist, taxes, owner privileges (OKX OnchainOS)
+    Risk(TokenIdentArg),
     /// Save a custom token so later symbol lookups can resolve it
     Add(TokenAddArgs),
 }

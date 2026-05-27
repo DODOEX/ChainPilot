@@ -22,6 +22,7 @@ pub async fn handle(
         TokenAction::Contract(args) => contract(args, api, config, store, output_mode).await,
         TokenAction::Price(args) => price(args, api, config, store, output_mode).await,
         TokenAction::Liquidity(args) => liquidity(args, api, config, store, output_mode).await,
+        TokenAction::Risk(args) => risk(args, api, config, store, output_mode).await,
         TokenAction::Add(args) => add(args, api, config, store, output_mode).await,
     }
 }
@@ -257,6 +258,67 @@ async fn liquidity(
     >(
         Ok(result),
         "token.liquidity",
+        output_mode,
+        OutputContext::new(chain_id, false),
+    ))
+}
+
+async fn risk(
+    args: crate::cli::token::TokenIdentArg,
+    api: &ApiClients,
+    config: &AppConfig,
+    store: &QuoteStore,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    let chain_id = config.chain_id;
+    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
+    let onchain = &chain_client;
+    let token_ref = match resolve_token(&args.token, chain_id, onchain, api, config, store).await {
+        Ok(t) => t,
+        Err(ChainError::TokenNotFound(_)) => {
+            let search = api
+                .token_metadata
+                .search_symbol(&args.token, chain_id)
+                .await;
+            if search.candidates.is_empty() {
+                return Ok(crate::output::print_output::<
+                    crate::models::token::TokenRisk,
+                >(
+                    Err(ChainError::TokenNotFound(args.token)),
+                    "token.risk",
+                    output_mode,
+                    OutputContext::new(chain_id, false),
+                ));
+            }
+            return Ok(crate::output::print_output::<
+                crate::models::token::TokenSearchResult,
+            >(
+                Ok(search),
+                "token.search",
+                output_mode,
+                OutputContext::new(chain_id, false),
+            ));
+        }
+        Err(e) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::TokenRisk,
+            >(
+                Err(e),
+                "token.risk",
+                output_mode,
+                OutputContext::new(chain_id, false),
+            ));
+        }
+    };
+    let result = api
+        .token_metadata
+        .fetch_risk(chain_id, &token_ref.address, &token_ref.symbol)
+        .await;
+    Ok(crate::output::print_output::<
+        crate::models::token::TokenRisk,
+    >(
+        Ok(result),
+        "token.risk",
         output_mode,
         OutputContext::new(chain_id, false),
     ))

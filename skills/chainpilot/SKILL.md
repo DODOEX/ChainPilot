@@ -341,6 +341,29 @@ and top pair details (DEX, pair address, 24h volume).
 | `top_pair.liquidity` | DexScreener | Top pair's liquidity (USD) |
 | `top_pair.volume_24h` | DexScreener | Top pair's 24h trading volume (USD) |
 
+### `token risk`
+
+```bash
+chainpilot [--chain-id <N>] token risk <TOKEN>
+```
+
+Token risk analysis from OKX OnchainOS: honeypot detection, blacklist status,
+transfer restrictions, minting, owner privileges, and buy/sell tax.
+
+| Field | Source | Notes |
+|---|---|---|
+| `risk_level` | OKX OnchainOS | e.g. `low`, `medium`, `high` |
+| `risk_score` | OKX OnchainOS | Numeric risk score |
+| `honeypot` | OKX OnchainOS | Whether the token is a honeypot |
+| `blacklist` | OKX OnchainOS | Whether the token has a blacklist |
+| `transfer_restricted` | OKX OnchainOS | Whether transfers are restricted |
+| `mintable` | OKX OnchainOS | Whether new tokens can be minted |
+| `owner_privileged` | OKX OnchainOS | Whether owner has special privileges |
+| `tax_buy` | OKX OnchainOS | Buy tax percentage |
+| `tax_sell` | OKX OnchainOS | Sell tax percentage |
+
+Native tokens (ETH, BNB, etc.) return hardcoded low-risk defaults.
+
 ### `token add`
 
 ```bash

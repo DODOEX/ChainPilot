@@ -310,6 +310,56 @@ impl TableRenderable for crate::models::token::TokenLiquidity {
     }
 }
 
+impl TableRenderable for crate::models::token::TokenRisk {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value", "Source"]);
+        table.add_row(vec!["Address", &self.address, ""]);
+        table.add_row(vec!["Symbol", &self.symbol, ""]);
+        table.add_row(vec!["Chain ID", &self.chain_id.to_string(), ""]);
+        add_risk_row(&mut table, "Risk Level", self.risk_level.as_deref(), self.sources.risk_level.as_deref());
+        add_risk_row_score(&mut table, "Risk Score", self.risk_score, self.sources.risk_score.as_deref());
+        add_risk_row_bool(&mut table, "Honeypot", self.honeypot, self.sources.honeypot.as_deref());
+        add_risk_row_bool(&mut table, "Blacklist", self.blacklist, self.sources.blacklist.as_deref());
+        add_risk_row_bool(&mut table, "Transfer Restricted", self.transfer_restricted, self.sources.transfer_restricted.as_deref());
+        add_risk_row_bool(&mut table, "Mintable", self.mintable, self.sources.mintable.as_deref());
+        add_risk_row_bool(&mut table, "Owner Privileged", self.owner_privileged, self.sources.owner_privileged.as_deref());
+        add_risk_row_pct(&mut table, "Buy Tax", self.tax_buy, self.sources.tax_buy.as_deref());
+        add_risk_row_pct(&mut table, "Sell Tax", self.tax_sell, self.sources.tax_sell.as_deref());
+        println!("{}", table);
+    }
+}
+
+fn add_risk_row(table: &mut Table, label: &str, value: Option<&str>, source: Option<&str>) {
+    let value = value.unwrap_or("N/A");
+    table.add_row(vec![label, value, source.unwrap_or("")]);
+}
+
+fn add_risk_row_bool(table: &mut Table, label: &str, value: Option<bool>, source: Option<&str>) {
+    let value = match value {
+        Some(true) => "Yes",
+        Some(false) => "No",
+        None => "N/A",
+    };
+    table.add_row(vec![label, value, source.unwrap_or("")]);
+}
+
+fn add_risk_row_score(table: &mut Table, label: &str, value: Option<f64>, source: Option<&str>) {
+    let value = match value {
+        Some(v) => format!("{}", v),
+        None => "N/A".to_string(),
+    };
+    table.add_row(vec![label, &value, source.unwrap_or("")]);
+}
+
+fn add_risk_row_pct(table: &mut Table, label: &str, value: Option<f64>, source: Option<&str>) {
+    let value = match value {
+        Some(v) => format_pct(v),
+        None => "N/A".to_string(),
+    };
+    table.add_row(vec![label, &value, source.unwrap_or("")]);
+}
+
 fn format_pct(value: f64) -> String {
     format!("{:.2}%", value)
 }
