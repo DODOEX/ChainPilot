@@ -1,6 +1,8 @@
 mod dodo;
+mod token_metadata;
 
 pub use dodo::DodoClient;
+pub use token_metadata::TokenMetadataClient;
 
 use crate::config::AppConfig;
 use crate::error::Result;
@@ -8,6 +10,7 @@ use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, USER_AGENT};
 
 pub struct ApiClients {
     pub dodo: DodoClient,
+    pub token_metadata: TokenMetadataClient,
 }
 
 impl ApiClients {
@@ -31,11 +34,12 @@ impl ApiClients {
 
         Ok(Self {
             dodo: DodoClient::new(
-                client,
+                client.clone(),
                 &config.dodo_api_url,
                 &config.dodo_api_key,
                 &config.dodo_project_id,
             ),
+            token_metadata: TokenMetadataClient::new(client, config),
         })
     }
 }

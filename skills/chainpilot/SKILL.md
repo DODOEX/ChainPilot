@@ -303,6 +303,28 @@ chainpilot [--chain-id <N>] token contract <TOKEN>
 
 On-chain contract details: proxy, owner, implementation address.
 
+### `token price`
+
+```bash
+chainpilot [--chain-id <N>] token price <TOKEN>
+```
+
+Real-time price, short-term and mid-term changes, and 24h high/low. CoinGecko is the primary data
+source; DexScreener is a fallback for `price`, `price_change_1h`, and `price_change_24h` when
+CoinGecko has no value (e.g. long-tail tokens not listed there).
+
+| Field | Primary | Fallback | Notes |
+|---|---|---|---|
+| `price` | CoinGecko | DexScreener | USD spot price |
+| `price_change_1h` | CoinGecko | DexScreener | % change over 1 hour |
+| `price_change_24h` | CoinGecko | DexScreener | % change over 24 hours |
+| `price_change_7d` | CoinGecko | — | % change over 7 days |
+| `high_24h` | CoinGecko | — | 24h high (USD) |
+| `low_24h` | CoinGecko | — | 24h low (USD) |
+
+The JSON output includes a `sources` map indicating which API supplied each field, so callers can
+distinguish CoinGecko-backed values from DexScreener-backed ones.
+
 ### `token add`
 
 ```bash

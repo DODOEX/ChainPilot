@@ -8,9 +8,83 @@ pub struct TokenInfo {
     pub name: String,
     pub decimals: u8,
     pub chain_id: u64,
-    pub total_supply: String,
-    pub total_supply_display: f64,
+    pub chain: Option<String>,
+    pub website: Option<String>,
+    pub social_links: TokenSocialLinks,
+    pub price: Option<f64>,
+    pub market_cap: Option<f64>,
+    pub fdv: Option<f64>,
+    pub primary_liquidity: Option<f64>,
+    pub volume_24h: Option<f64>,
+    pub price_change_24h: Option<f64>,
+    pub risk_level: Option<String>,
+    pub metadata_sources: TokenMetadataSources,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenSearchResult {
+    pub query: String,
+    pub chain_id: u64,
+    pub candidates: Vec<TokenSearchCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenSearchCandidate {
     pub source: String,
+    pub symbol: String,
+    pub name: Option<String>,
+    pub address: Option<String>,
+    pub chain: Option<String>,
+    pub primary_liquidity: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TokenSocialLinks {
+    pub x: Option<String>,
+    pub telegram: Option<String>,
+    pub discord: Option<String>,
+    pub github: Option<String>,
+    pub docs: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TokenMetadataSources {
+    pub identity: Option<String>,
+    pub address: Option<String>,
+    pub chain: Option<String>,
+    pub website: Option<String>,
+    pub social_links: Option<String>,
+    pub price: Option<String>,
+    pub market_cap: Option<String>,
+    pub fdv: Option<String>,
+    pub primary_liquidity: Option<String>,
+    pub volume_24h: Option<String>,
+    pub price_change_24h: Option<String>,
+    pub risk_level: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenPrice {
+    pub address: String,
+    pub symbol: String,
+    pub chain_id: u64,
+    pub price: Option<f64>,
+    pub price_change_1h: Option<f64>,
+    pub price_change_24h: Option<f64>,
+    pub price_change_7d: Option<f64>,
+    pub high_24h: Option<f64>,
+    pub low_24h: Option<f64>,
+    pub sources: TokenPriceSources,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TokenPriceSources {
+    pub price: Option<String>,
+    pub price_change_1h: Option<String>,
+    pub price_change_24h: Option<String>,
+    pub price_change_7d: Option<String>,
+    pub high_24h: Option<String>,
+    pub low_24h: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

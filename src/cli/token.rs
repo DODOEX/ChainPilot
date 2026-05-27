@@ -9,10 +9,12 @@ pub struct TokenCmd {
 
 #[derive(Subcommand)]
 pub enum TokenAction {
-    /// Token metadata (name, symbol, decimals, supply)
+    /// Token metadata; unresolved symbols return candidate matches
     Info(TokenIdentArg),
     /// On-chain contract details
     Contract(TokenIdentArg),
+    /// Real-time price, % changes, and 24h high/low (CoinGecko primary, DexScreener fallback)
+    Price(TokenIdentArg),
     /// Save a custom token so later symbol lookups can resolve it
     Add(TokenAddArgs),
     /// Create a token via DODO's ERC20V3Factory
@@ -27,7 +29,7 @@ pub enum TokenAction {
 
 #[derive(Args)]
 pub struct TokenIdentArg {
-    /// Token symbol or contract address
+    /// Token symbol or contract address; unknown symbols return external-source candidates
     pub token: String,
 }
 
