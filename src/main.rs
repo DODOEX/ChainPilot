@@ -18,6 +18,29 @@ use crate::cli::Cli;
 use crate::config::AppConfig;
 use crate::output::OutputMode;
 
+/// Load the persistent config file (`config.env` in the data directory).
+/// Unlike `dotenvy::dotenv()`, this always sets env vars so config file
+/// values take precedence over the CWD `.env` file.
+fn load_config_env() {
+    let data_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("chain");
+    let config_path = data_dir.join("config.env");
+    let content = match std::fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            std::env::set_var(key.trim(), value.trim());
+        }
+    }
+}
+
 fn apply_cli_overrides(config: &mut AppConfig, cli: &Cli) {
     // CLI args take highest precedence (above runtime env vars and compile-time defaults).
     if let Some(rpc_url) = cli.rpc_url.clone() {
@@ -57,6 +80,7 @@ fn apply_cli_overrides(config: &mut AppConfig, cli: &Cli) {
 #[tokio::main]
 async fn main() -> Result<ExitCode> {
     dotenvy::dotenv().ok();
+    load_config_env();
 
     if std::env::var("RUST_LOG").is_ok() {
         tracing_subscriber::fmt()

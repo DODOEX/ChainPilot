@@ -1,18 +1,12 @@
 use std::time::Duration;
 
-use base64::Engine;
-use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde::Deserialize;
-use sha2::Sha256;
-
 use crate::config::AppConfig;
 use crate::models::token::{
     TokenInfo, TokenPrice, TokenPriceSources, TokenSearchCandidate, TokenSearchResult,
     TokenSocialLinks,
 };
-
-type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Clone)]
 pub struct TokenMetadataClient {
@@ -20,11 +14,6 @@ pub struct TokenMetadataClient {
     coingecko_base_url: String,
     coingecko_api_key: Option<String>,
     dexscreener_base_url: String,
-    okx_base_url: String,
-    okx_api_key: Option<String>,
-    okx_api_secret: Option<String>,
-    okx_api_passphrase: Option<String>,
-    okx_project_id: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -104,6 +93,8 @@ struct DexScreenerResponse {
 
 #[derive(Debug, Deserialize)]
 struct DexScreenerPair {
+    #[serde(rename = "chainId")]
+    chain_id: Option<String>,
     #[serde(rename = "baseToken")]
     base_token: Option<DexScreenerToken>,
     liquidity: Option<DexScreenerLiquidity>,
@@ -137,66 +128,34 @@ struct DexScreenerToken {
 }
 
 #[derive(Debug, Deserialize)]
-struct OkxSearchEnvelope {
-    data: Option<OkxSearchData>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OkxSearchData {
-    #[serde(rename = "tokenList")]
-    token_list: Option<Vec<OkxToken>>,
-}
-
-#[derive(Debug, Deserialize)]
 struct DexScreenerLiquidity {
     usd: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
-struct OkxEnvelope<T> {
-    data: Option<T>,
+struct GoPlusResponse {
+    code: u64,
+    result: Option<std::collections::HashMap<String, GoPlusTokenSecurity>>,
 }
 
-#[derive(Debug, Deserialize)]
-struct OkxToken {
-    #[serde(rename = "tokenContractAddress")]
-    token_contract_address: Option<String>,
-    #[serde(rename = "tokenSymbol")]
-    token_symbol: Option<String>,
-    #[serde(rename = "tokenName")]
-    token_name: Option<String>,
-    #[serde(rename = "tagList")]
-    tag_list: Option<OkxTagList>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OkxTagList {
-    #[serde(rename = "communityRecognized")]
-    community_recognized: Option<bool>,
-}
-
-#[derive(Debug, Deserialize)]
-struct OkxRiskToken {
-    #[serde(rename = "tokenContractAddress")]
-    token_contract_address: Option<String>,
-    #[serde(rename = "riskLevel")]
-    risk_level: Option<String>,
-    #[serde(rename = "riskScore")]
-    risk_score: Option<f64>,
-    #[serde(rename = "isHoneypot")]
-    is_honeypot: Option<bool>,
-    #[serde(rename = "isBlacklist")]
-    is_blacklist: Option<bool>,
-    #[serde(rename = "isTransferRestrict")]
-    is_transfer_restrict: Option<bool>,
-    #[serde(rename = "isMintable")]
-    is_mintable: Option<bool>,
-    #[serde(rename = "isOwnerPrivileged")]
-    is_owner_privileged: Option<bool>,
-    #[serde(rename = "buyTax")]
-    buy_tax: Option<f64>,
-    #[serde(rename = "sellTax")]
-    sell_tax: Option<f64>,
+#[derive(Clone, Debug, Deserialize)]
+struct GoPlusTokenSecurity {
+    #[serde(rename = "is_honeypot")]
+    is_honeypot: Option<String>,
+    #[serde(rename = "is_blacklisted")]
+    is_blacklisted: Option<String>,
+    #[serde(rename = "transfer_pausable")]
+    transfer_pausable: Option<String>,
+    #[serde(rename = "is_mintable")]
+    is_mintable: Option<String>,
+    #[serde(rename = "owner_change_balance")]
+    owner_change_balance: Option<String>,
+    #[serde(rename = "buy_tax")]
+    buy_tax: Option<String>,
+    #[serde(rename = "sell_tax")]
+    sell_tax: Option<String>,
+    #[serde(rename = "trust_list")]
+    trust_list: Option<String>,
 }
 
 impl TokenMetadataClient {
@@ -206,11 +165,6 @@ impl TokenMetadataClient {
             coingecko_base_url: config.coingecko_api_url.trim_end_matches('/').to_string(),
             coingecko_api_key: config.coingecko_api_key.clone(),
             dexscreener_base_url: config.dexscreener_api_url.trim_end_matches('/').to_string(),
-            okx_base_url: config.okx_dex_api_url.trim_end_matches('/').to_string(),
-            okx_api_key: config.okx_api_key.clone(),
-            okx_api_secret: config.okx_api_secret.clone(),
-            okx_api_passphrase: config.okx_api_passphrase.clone(),
-            okx_project_id: config.okx_project_id.clone(),
         }
     }
 
@@ -240,12 +194,24 @@ impl TokenMetadataClient {
             info.address.clone()
         };
         let dexscreener = self.fetch_dexscreener(&dexscreener_addr).await.ok();
-        let okx = self.fetch_okx_token(info.chain_id, &info.address).await;
 
         let mut patch = TokenMetadataPatch::default();
         apply_coingecko(&mut patch, coingecko);
         apply_dexscreener(&mut patch, dexscreener, &dexscreener_addr);
-        apply_okx(&mut patch, okx);
+
+        // Native tokens are inherently low-risk
+        if is_native {
+            patch.risk_level = Some(("low".to_string(), "chain-config".to_string()));
+        }
+
+        // Use GoPlus for risk_level
+        if patch.risk_level.is_none() && !is_native {
+            if let Some(goplus) = self.fetch_goplus_risk(info.chain_id, &info.address).await {
+                let a = assess_goplus_risk(&goplus);
+                patch.risk_level = Some((a.risk_level, "goplus".to_string()));
+            }
+        }
+
         apply_patch(&mut info, patch);
         info
     }
@@ -427,7 +393,7 @@ impl TokenMetadataClient {
             };
         }
 
-        let okx = self.fetch_okx_risk(chain_id, address).await;
+        let goplus = self.fetch_goplus_risk(chain_id, address).await;
 
         let mut risk = TokenRisk {
             address: address.to_string(),
@@ -445,8 +411,9 @@ impl TokenMetadataClient {
             sources: TokenRiskSources::default(),
         };
 
-        if let Some(data) = okx {
-            let src = "okx-onchainos";
+        if let Some(data) = goplus {
+            let src = "goplus";
+            let a = assess_goplus_risk(&data);
             macro_rules! set {
                 ($model:ident, $val:expr) => {
                     if risk.$model.is_none() {
@@ -455,75 +422,53 @@ impl TokenMetadataClient {
                     }
                 };
             }
-            if let Some(v) = data.risk_level { set!(risk_level, v); }
-            if let Some(v) = data.risk_score { set!(risk_score, v); }
-            if let Some(v) = data.is_honeypot { set!(honeypot, v); }
-            if let Some(v) = data.is_blacklist { set!(blacklist, v); }
-            if let Some(v) = data.is_transfer_restrict { set!(transfer_restricted, v); }
-            if let Some(v) = data.is_mintable { set!(mintable, v); }
-            if let Some(v) = data.is_owner_privileged { set!(owner_privileged, v); }
-            if let Some(v) = data.buy_tax { set!(tax_buy, v); }
-            if let Some(v) = data.sell_tax { set!(tax_sell, v); }
+            set!(honeypot, a.honeypot);
+            set!(blacklist, a.blacklist);
+            set!(transfer_restricted, a.transfer_restricted);
+            set!(mintable, a.mintable);
+            set!(owner_privileged, a.owner_privileged);
+            if let Some(v) = a.tax_buy { set!(tax_buy, v); }
+            if let Some(v) = a.tax_sell { set!(tax_sell, v); }
+            set!(risk_score, a.risk_score);
+            set!(risk_level, a.risk_level);
         }
 
         risk
     }
 
-    async fn fetch_okx_risk(
+    async fn fetch_goplus_risk(
         &self,
         chain_id: u64,
         address: &str,
-    ) -> Option<OkxRiskToken> {
-        let api_key = self.okx_api_key.as_ref()?;
-        let secret = self.okx_api_secret.as_ref()?;
-        let passphrase = self.okx_api_passphrase.as_ref()?;
-        let request_path = "/api/v6/dex/market/token/risk";
-        let body = serde_json::json!([
-            {
-                "chainIndex": chain_id.to_string(),
-                "tokenContractAddress": address,
-            }
-        ])
-        .to_string();
-        let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let signature = okx_signature(&timestamp, "POST", request_path, &body, secret).ok()?;
-        let url = format!("{}{}", self.okx_base_url, request_path);
-
-        let mut req = self
+    ) -> Option<GoPlusTokenSecurity> {
+        let goplus_chain = goplus_chain_id(chain_id)?;
+        let url = format!(
+            "https://api.gopluslabs.io/api/v1/token_security/{}",
+            goplus_chain
+        );
+        let resp = self
             .client
-            .post(url)
-            .timeout(Duration::from_secs(8))
-            .header("OK-ACCESS-KEY", api_key)
-            .header("OK-ACCESS-SIGN", signature)
-            .header("OK-ACCESS-TIMESTAMP", timestamp)
-            .header("OK-ACCESS-PASSPHRASE", passphrase)
-            .body(body);
-        if let Some(project_id) = &self.okx_project_id {
-            req = req.header("OK-ACCESS-PROJECT", project_id);
-        }
-
-        let envelope = req
+            .get(&url)
+            .query(&[("contract_addresses", address)])
+            .timeout(Duration::from_secs(10))
             .send()
             .await
-            .ok()?
-            .error_for_status()
-            .ok()?
-            .json::<OkxEnvelope<Vec<OkxRiskToken>>>()
-            .await
             .ok()?;
-
-        envelope.data?.into_iter().find(|token| {
-            token
-                .token_contract_address
-                .as_deref()
-                .is_some_and(|a| a.eq_ignore_ascii_case(address))
-        })
+        let status = resp.status();
+        let body_text = resp.text().await.ok()?;
+        tracing::debug!("GoPlus risk API status={status}, body={}", if body_text.len() > 500 { &body_text[..500] } else { &body_text });
+        let data: GoPlusResponse = serde_json::from_str(&body_text).ok()?;
+        if data.code != 1 {
+            return None;
+        }
+        let result = data.result?;
+        let addr_lower = address.to_lowercase();
+        result.get(&addr_lower).cloned().or_else(|| result.into_values().next())
     }
 
     pub async fn search_symbol(&self, query: &str, chain_id: u64) -> TokenSearchResult {
         let mut candidates = Vec::new();
 
-        candidates.extend(self.search_okx(query, chain_id).await);
         candidates.extend(self.search_coingecko(query, chain_id).await);
         candidates.extend(self.search_dexscreener(query).await);
 
@@ -572,12 +517,12 @@ impl TokenMetadataClient {
                     .platforms
                     .as_ref()
                     .and_then(|platforms| platforms.get(platform))
-                    .and_then(|address| non_empty(Some(address.clone())));
+                    .and_then(|address| non_empty(Some(address.clone())))?;
                 Some(TokenSearchCandidate {
                     source: "coingecko".to_string(),
                     symbol,
                     name: non_empty(coin.name),
-                    address,
+                    address: Some(address),
                     chain: Some(platform.to_string()),
                     top_liquidity: None,
                 })
@@ -617,12 +562,17 @@ impl TokenMetadataClient {
                 if symbol != query_upper {
                     return None;
                 }
+                let address = non_empty(token.address).filter(|a| {
+                    // Only include EVM addresses (0x prefix, 42 chars)
+                    a.starts_with("0x") && a.len() == 42
+                })?;
+                let chain_id = pair.chain_id.as_deref().and_then(|c| c.parse::<u64>().ok());
                 Some(TokenSearchCandidate {
                     source: "dexscreener".to_string(),
                     symbol,
                     name: non_empty(token.name),
-                    address: non_empty(token.address),
-                    chain: None,
+                    address: Some(address),
+                    chain: chain_id.map(|id| id.to_string()),
                     top_liquidity: pair.liquidity.and_then(|liquidity| liquidity.usd),
                 })
             })
@@ -630,77 +580,6 @@ impl TokenMetadataClient {
             .collect()
     }
 
-    async fn search_okx(&self, query: &str, chain_id: u64) -> Vec<TokenSearchCandidate> {
-        let api_key = match self.okx_api_key.as_ref() {
-            Some(value) => value,
-            None => return Vec::new(),
-        };
-        let secret = match self.okx_api_secret.as_ref() {
-            Some(value) => value,
-            None => return Vec::new(),
-        };
-        let passphrase = match self.okx_api_passphrase.as_ref() {
-            Some(value) => value,
-            None => return Vec::new(),
-        };
-        let request_path = "/api/v6/dex/market/token/search";
-        let body = serde_json::json!({
-            "chainIndex": chain_id.to_string(),
-            "tokenSymbol": query,
-        })
-        .to_string();
-        let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let Ok(signature) = okx_signature(&timestamp, "POST", request_path, &body, secret) else {
-            return Vec::new();
-        };
-        let url = format!("{}{}", self.okx_base_url, request_path);
-
-        let mut req = self
-            .client
-            .post(url)
-            .timeout(Duration::from_secs(8))
-            .header("OK-ACCESS-KEY", api_key)
-            .header("OK-ACCESS-SIGN", signature)
-            .header("OK-ACCESS-TIMESTAMP", timestamp)
-            .header("OK-ACCESS-PASSPHRASE", passphrase)
-            .body(body);
-        if let Some(project_id) = &self.okx_project_id {
-            req = req.header("OK-ACCESS-PROJECT", project_id);
-        }
-
-        let Ok(response) = req
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-        else {
-            return Vec::new();
-        };
-        let Ok(search) = response.json::<OkxSearchEnvelope>().await else {
-            return Vec::new();
-        };
-        let query_upper = query.to_uppercase();
-        search
-            .data
-            .and_then(|data| data.token_list)
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|token| {
-                let symbol = non_empty(token.token_symbol).map(|symbol| symbol.to_uppercase())?;
-                if symbol != query_upper {
-                    return None;
-                }
-                Some(TokenSearchCandidate {
-                    source: "okx-onchainos".to_string(),
-                    symbol,
-                    name: non_empty(token.token_name),
-                    address: non_empty(token.token_contract_address),
-                    chain: Some(chain_id.to_string()),
-                    top_liquidity: None,
-                })
-            })
-            .take(3)
-            .collect()
-    }
 
     async fn fetch_coingecko(
         &self,
@@ -765,52 +644,6 @@ impl TokenMetadataClient {
             .await
     }
 
-    async fn fetch_okx_token(&self, chain_id: u64, address: &str) -> Option<OkxToken> {
-        let api_key = self.okx_api_key.as_ref()?;
-        let secret = self.okx_api_secret.as_ref()?;
-        let passphrase = self.okx_api_passphrase.as_ref()?;
-        let request_path = "/api/v6/dex/market/token/basic-info";
-        let body = serde_json::json!([
-            {
-                "chainIndex": chain_id.to_string(),
-                "tokenContractAddress": address,
-            }
-        ])
-        .to_string();
-        let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let signature = okx_signature(&timestamp, "POST", request_path, &body, secret).ok()?;
-        let url = format!("{}{}", self.okx_base_url, request_path);
-
-        let mut req = self
-            .client
-            .post(url)
-            .timeout(Duration::from_secs(8))
-            .header("OK-ACCESS-KEY", api_key)
-            .header("OK-ACCESS-SIGN", signature)
-            .header("OK-ACCESS-TIMESTAMP", timestamp)
-            .header("OK-ACCESS-PASSPHRASE", passphrase)
-            .body(body);
-        if let Some(project_id) = &self.okx_project_id {
-            req = req.header("OK-ACCESS-PROJECT", project_id);
-        }
-
-        let envelope = req
-            .send()
-            .await
-            .ok()?
-            .error_for_status()
-            .ok()?
-            .json::<OkxEnvelope<Vec<OkxToken>>>()
-            .await
-            .ok()?;
-
-        envelope.data?.into_iter().find(|token| {
-            token
-                .token_contract_address
-                .as_deref()
-                .is_some_and(|token_address| token_address.eq_ignore_ascii_case(address))
-        })
-    }
 }
 
 fn apply_coingecko(patch: &mut TokenMetadataPatch, token: Option<CoinGeckoToken>) {
@@ -1023,39 +856,6 @@ fn apply_dexscreener_price(
     }
 }
 
-fn apply_okx(patch: &mut TokenMetadataPatch, token: Option<OkxToken>) {
-    let Some(token) = token else {
-        return;
-    };
-    if patch.name.is_none() {
-        if let Some(name) = non_empty(token.token_name) {
-            patch.name = Some((name, "okx-onchainos".to_string()));
-        }
-    }
-    if patch.symbol.is_none() {
-        if let Some(symbol) = non_empty(token.token_symbol) {
-            patch.symbol = Some((symbol, "okx-onchainos".to_string()));
-        }
-    }
-    if patch.address.is_none() {
-        if let Some(address) = non_empty(token.token_contract_address) {
-            patch.address = Some((address, "okx-onchainos".to_string()));
-        }
-    }
-    if patch.risk_level.is_none() {
-        if let Some(community_recognized) =
-            token.tag_list.and_then(|tags| tags.community_recognized)
-        {
-            let risk = if community_recognized {
-                "low"
-            } else {
-                "unknown"
-            };
-            patch.risk_level = Some((risk.to_string(), "okx-onchainos".to_string()));
-        }
-    }
-}
-
 fn apply_patch(info: &mut TokenInfo, patch: TokenMetadataPatch) {
     let mut sources = info.sources.clone();
 
@@ -1133,16 +933,86 @@ fn coingecko_platform_id(chain_id: u64) -> Option<&'static str> {
     }
 }
 
-fn okx_signature(
-    timestamp: &str,
-    method: &str,
-    request_path: &str,
-    body: &str,
-    secret: &str,
-) -> Result<String, hmac::digest::InvalidLength> {
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())?;
-    mac.update(format!("{}{}{}{}", timestamp, method, request_path, body).as_bytes());
-    Ok(base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes()))
+fn goplus_chain_id(chain_id: u64) -> Option<&'static str> {
+    match chain_id {
+        1 => Some("1"),
+        56 => Some("56"),
+        137 => Some("137"),
+        42161 => Some("42161"),
+        10 => Some("10"),
+        43114 => Some("43114"),
+        8453 => Some("8453"),
+        59144 => Some("59144"),
+        534352 => Some("534352"),
+        169 => Some("169"),
+        5000 => Some("5000"),
+        1313161554 => Some("1313161554"),
+        66 => Some("66"),
+        1030 => Some("1030"),
+        167000 => Some("167000"),
+        98866 => Some("98866"),
+        11155111 => Some("11155111"),
+        _ => None,
+    }
+}
+
+struct GoPlusRiskAssessment {
+    honeypot: bool,
+    blacklist: bool,
+    transfer_restricted: bool,
+    mintable: bool,
+    owner_privileged: bool,
+    tax_buy: Option<f64>,
+    tax_sell: Option<f64>,
+    risk_score: f64,
+    risk_level: String,
+}
+
+fn assess_goplus_risk(data: &GoPlusTokenSecurity) -> GoPlusRiskAssessment {
+    let honeypot = data.is_honeypot.as_deref() == Some("1");
+    let blacklist = data.is_blacklisted.as_deref() == Some("1");
+    let transfer_restricted = data.transfer_pausable.as_deref() == Some("1");
+    let mintable = data.is_mintable.as_deref() == Some("1");
+    let owner_privileged = data.owner_change_balance.as_deref() == Some("1");
+    let trusted = data.trust_list.as_deref() == Some("1");
+    let buy_tax = data.buy_tax.as_deref().and_then(|s| {
+        if s.is_empty() { Some(0.0) } else { s.parse::<f64>().ok() }
+    });
+    let sell_tax = data.sell_tax.as_deref().and_then(|s| {
+        if s.is_empty() { Some(0.0) } else { s.parse::<f64>().ok() }
+    });
+
+    // Trusted tokens (e.g. USDT, USDC) have their centralized-control
+    // penalties heavily discounted because those features are expected
+    // for regulated/centralized assets, not scam signals.
+    let centralization_weight: f64 = if trusted { 0.1 } else { 1.0 };
+
+    let mut score: f64 = 0.0;
+    // Honeypot is always critical regardless of trust status
+    if honeypot { score += 100.0; }
+    // Centralized-control signals: discounted for trusted tokens
+    if blacklist { score += 30.0 * centralization_weight; }
+    if transfer_restricted { score += 20.0 * centralization_weight; }
+    if mintable { score += 15.0 * centralization_weight; }
+    if owner_privileged { score += 15.0 * centralization_weight; }
+    // Tax signals apply at full weight regardless of trust
+    if let Some(t) = buy_tax { score += t.min(50.0); }
+    if let Some(t) = sell_tax { score += t.min(50.0); }
+    score = score.min(100.0);
+
+    let level = if score >= 70.0 { "high" } else if score >= 30.0 { "medium" } else { "low" };
+
+    GoPlusRiskAssessment {
+        honeypot,
+        blacklist,
+        transfer_restricted,
+        mintable,
+        owner_privileged,
+        tax_buy: buy_tax,
+        tax_sell: sell_tax,
+        risk_score: score,
+        risk_level: level.to_string(),
+    }
 }
 
 fn first_non_empty(values: Option<Vec<String>>) -> Option<String> {
@@ -1200,6 +1070,7 @@ mod tests {
                         dex_id: None,
                         pair_address: None,
                         volume: None,
+                        chain_id: None,
                     },
                     DexScreenerPair {
                         base_token: Some(DexScreenerToken {
@@ -1213,6 +1084,7 @@ mod tests {
                         dex_id: None,
                         pair_address: None,
                         volume: None,
+                        chain_id: None,
                     },
                 ]),
             }),
@@ -1244,6 +1116,7 @@ mod tests {
                     dex_id: None,
                     pair_address: None,
                     volume: None,
+                    chain_id: None,
                 }]),
             }),
             "0xabc",
@@ -1329,6 +1202,7 @@ mod tests {
                     dex_id: None,
                     pair_address: None,
                     volume: None,
+                    chain_id: None,
                 }]),
             }),
             "0xabc",
@@ -1366,6 +1240,7 @@ mod tests {
                     dex_id: None,
                     pair_address: None,
                     volume: None,
+                    chain_id: None,
                 }]),
             }),
             "0xabc",

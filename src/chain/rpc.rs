@@ -289,16 +289,8 @@ mod tests {
     }
 
     fn base_config() -> AppConfig {
-        let (
-            coingecko_api_url,
-            coingecko_api_key,
-            dexscreener_api_url,
-            okx_dex_api_url,
-            okx_api_key,
-            okx_api_secret,
-            okx_api_passphrase,
-            okx_project_id,
-        ) = crate::config::test_metadata_config_fields();
+        let (coingecko_api_url, coingecko_api_key, dexscreener_api_url) =
+            crate::config::test_metadata_config_fields();
         AppConfig {
             rpc_url: "https://ethereum-rpc.publicnode.com".to_string(),
             rpc_url_overridden: false,
@@ -314,11 +306,6 @@ mod tests {
             coingecko_api_url,
             coingecko_api_key,
             dexscreener_api_url,
-            okx_dex_api_url,
-            okx_api_key,
-            okx_api_secret,
-            okx_api_passphrase,
-            okx_project_id,
             data_dir: std::env::temp_dir(),
         }
     }
