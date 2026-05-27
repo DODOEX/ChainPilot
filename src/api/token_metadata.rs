@@ -200,13 +200,29 @@ impl TokenMetadataClient {
     }
 
     pub async fn fetch_price(&self, chain_id: u64, address: &str, symbol: &str) -> TokenPrice {
-        let chain_slug = coingecko_platform_id(chain_id);
+        let is_native = address.eq_ignore_ascii_case(crate::config::chains::NATIVE_ADDR);
+        let cc = crate::config::chain_config(chain_id);
 
-        let coingecko = match chain_slug {
-            Some(platform) => self.fetch_coingecko(platform, address).await.ok(),
-            None => None,
+        let coingecko = if is_native {
+            match cc.map(|c| c.native_token.coingecko_id) {
+                Some(id) => self.fetch_coingecko_by_id(id).await.ok(),
+                None => None,
+            }
+        } else {
+            match coingecko_platform_id(chain_id) {
+                Some(platform) => self.fetch_coingecko(platform, address).await.ok(),
+                None => None,
+            }
         };
-        let dexscreener = self.fetch_dexscreener(address).await.ok();
+
+        // DexScreener: native tokens trade as their wrapped version on DEXes
+        let dexscreener_addr = if is_native {
+            cc.map(|c| c.native_token.wrapped_address)
+                .unwrap_or(address)
+        } else {
+            address
+        };
+        let dexscreener = self.fetch_dexscreener(dexscreener_addr).await.ok();
 
         let mut price = TokenPrice {
             address: address.to_string(),
@@ -222,7 +238,7 @@ impl TokenMetadataClient {
         };
 
         apply_coingecko_price(&mut price, coingecko);
-        apply_dexscreener_price(&mut price, dexscreener, address);
+        apply_dexscreener_price(&mut price, dexscreener, dexscreener_addr);
         price
     }
 
@@ -417,6 +433,28 @@ impl TokenMetadataClient {
             "{}/coins/{}/contract/{}",
             self.coingecko_base_url, platform, address
         );
+        let mut req = self
+            .client
+            .get(url)
+            .timeout(Duration::from_secs(8))
+            .query(&[
+                ("localization", "false"),
+                ("tickers", "false"),
+                ("community_data", "false"),
+                ("developer_data", "false"),
+                ("sparkline", "false"),
+            ]);
+        if let Some(key) = &self.coingecko_api_key {
+            req = req.header("x-cg-demo-api-key", key);
+        }
+        req.send().await?.error_for_status()?.json().await
+    }
+
+    async fn fetch_coingecko_by_id(
+        &self,
+        coin_id: &str,
+    ) -> Result<CoinGeckoToken, reqwest::Error> {
+        let url = format!("{}/coins/{}", self.coingecko_base_url, coin_id);
         let mut req = self
             .client
             .get(url)

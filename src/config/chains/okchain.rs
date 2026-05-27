@@ -16,5 +16,6 @@ pub static CONFIG: ChainConfig = ChainConfig {
         decimals: 18,
         wrapped_symbol: "WOKT",
         wrapped_address: "0x8F8526dbfd6E38E3D8307702cA8469Bae6C56C15",
+        coingecko_id: "oec-token",
     },
 };

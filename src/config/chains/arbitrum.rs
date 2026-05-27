@@ -16,5 +16,6 @@ pub static CONFIG: ChainConfig = ChainConfig {
         decimals: 18,
         wrapped_symbol: "WETH",
         wrapped_address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+        coingecko_id: "ethereum",
     },
 };
