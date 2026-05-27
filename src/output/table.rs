@@ -232,8 +232,8 @@ impl TableRenderable for crate::models::token::TokenInfo {
         if let Some(fdv) = self.fdv {
             table.add_row(vec!["FDV (USD)", &format_usd(fdv)]);
         }
-        if let Some(liquidity) = self.primary_liquidity {
-            table.add_row(vec!["Primary Liquidity (USD)", &format_usd(liquidity)]);
+        if let Some(liquidity) = self.top_liquidity {
+            table.add_row(vec!["Top Liquidity (USD)", &format_usd(liquidity)]);
         }
         if let Some(volume) = self.volume_24h {
             table.add_row(vec!["Volume 24h (USD)", &format_usd(volume)]);
@@ -300,6 +300,37 @@ fn add_price_row(table: &mut Table, label: &str, value: Option<String>, source: 
     table.add_row(vec![label, &value, source.unwrap_or("")]);
 }
 
+impl TableRenderable for crate::models::token::TokenLiquidity {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Address", &self.address]);
+        table.add_row(vec!["Symbol", &self.symbol]);
+        table.add_row(vec!["Chain ID", &self.chain_id.to_string()]);
+        table.add_row(vec![
+            "Top Liquidity (USD)",
+            &self
+                .top_liquidity
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec!["Pair Count", &self.pair_count.to_string()]);
+        if let Some(ref top) = self.top_pair {
+            table.add_row(vec!["Top Pair Address", &top.pair_address]);
+            table.add_row(vec!["Top Pair DEX", &top.dex]);
+            table.add_row(vec![
+                "Top Pair Liquidity (USD)",
+                &top.liquidity.map(format_usd).unwrap_or_else(|| "N/A".to_string()),
+            ]);
+            table.add_row(vec![
+                "Top Pair Volume 24h (USD)",
+                &top.volume_24h.map(format_usd).unwrap_or_else(|| "N/A".to_string()),
+            ]);
+        }
+        println!("{}", table);
+    }
+}
+
 fn format_pct(value: f64) -> String {
     format!("{:.2}%", value)
 }
@@ -313,7 +344,7 @@ impl TableRenderable for crate::models::token::TokenSearchResult {
             "Name",
             "Address",
             "Chain",
-            "Primary Liquidity",
+            "Top Liquidity",
         ]);
         for candidate in &self.candidates {
             table.add_row(vec![
@@ -323,7 +354,7 @@ impl TableRenderable for crate::models::token::TokenSearchResult {
                 candidate.address.as_deref().unwrap_or(""),
                 candidate.chain.as_deref().unwrap_or(""),
                 &candidate
-                    .primary_liquidity
+                    .top_liquidity
                     .map(format_usd)
                     .unwrap_or_else(String::new),
             ]);
