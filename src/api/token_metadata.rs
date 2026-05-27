@@ -181,19 +181,36 @@ impl TokenMetadataClient {
     }
 
     pub async fn enrich(&self, mut info: TokenInfo) -> TokenInfo {
-        let chain_slug = coingecko_platform_id(info.chain_id);
-        let address = info.address.clone();
+        let is_native = info
+            .address
+            .eq_ignore_ascii_case(crate::config::chains::NATIVE_ADDR);
+        let cc = crate::config::chain_config(info.chain_id);
 
-        let coingecko = match chain_slug {
-            Some(platform) => self.fetch_coingecko(platform, &address).await.ok(),
-            None => None,
+        let coingecko = if is_native {
+            match cc.map(|c| c.native_token.coingecko_id) {
+                Some(id) => self.fetch_coingecko_by_id(id).await.ok(),
+                None => None,
+            }
+        } else {
+            match coingecko_platform_id(info.chain_id) {
+                Some(platform) => self.fetch_coingecko(platform, &info.address).await.ok(),
+                None => None,
+            }
         };
-        let dexscreener = self.fetch_dexscreener(&address).await.ok();
-        let okx = self.fetch_okx_token(info.chain_id, &address).await;
+
+        let dexscreener_addr = if is_native {
+            cc.map(|c| c.native_token.wrapped_address)
+                .unwrap_or(info.address.as_str())
+                .to_string()
+        } else {
+            info.address.clone()
+        };
+        let dexscreener = self.fetch_dexscreener(&dexscreener_addr).await.ok();
+        let okx = self.fetch_okx_token(info.chain_id, &info.address).await;
 
         let mut patch = TokenMetadataPatch::default();
         apply_coingecko(&mut patch, coingecko);
-        apply_dexscreener(&mut patch, dexscreener, &address);
+        apply_dexscreener(&mut patch, dexscreener, &dexscreener_addr);
         apply_okx(&mut patch, okx);
         apply_patch(&mut info, patch);
         info
@@ -790,7 +807,10 @@ fn apply_patch(info: &mut TokenInfo, patch: TokenMetadataPatch) {
         sources.identity.get_or_insert(source);
     }
     if let Some((value, source)) = patch.address {
-        if info.address != value {
+        let is_native = info
+            .address
+            .eq_ignore_ascii_case(crate::config::chains::NATIVE_ADDR);
+        if !is_native && info.address != value {
             info.address = value;
             sources.identity.get_or_insert(source);
         }
