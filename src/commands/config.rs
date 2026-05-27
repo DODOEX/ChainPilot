@@ -1,5 +1,8 @@
 use std::process::ExitCode;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use crate::cli::config::{ConfigAction, ConfigCmd, ConfigKeyArg, ConfigSetArgs};
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
@@ -25,11 +28,7 @@ fn mask_value(value: &str) -> String {
     if value.len() <= 8 {
         return "*".repeat(value.len());
     }
-    format!(
-        "{}...{}",
-        &value[..4],
-        &value[value.len() - 4..]
-    )
+    format!("{}...{}", &value[..4], &value[value.len() - 4..])
 }
 
 fn read_config_file(path: &std::path::Path) -> Vec<(String, String)> {
@@ -58,7 +57,18 @@ fn write_config_file(path: &std::path::Path, entries: &[(String, String)]) -> st
         .iter()
         .map(|(k, v)| format!("{}={}\n", k, v))
         .collect();
-    std::fs::write(path, content)
+    std::fs::write(path, content)?;
+    set_config_file_permissions(path)
+}
+
+#[cfg(unix)]
+fn set_config_file_permissions(path: &std::path::Path) -> std::io::Result<()> {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn set_config_file_permissions(_path: &std::path::Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 pub async fn handle(
@@ -81,8 +91,8 @@ fn set(
     output_mode: OutputMode,
     config: &AppConfig,
 ) -> Result<ExitCode> {
-    let (key, env_var, _sensitive) =
-        find_key(&args.key).ok_or_else(|| ChainError::Config(format!(
+    let (key, env_var, _sensitive) = find_key(&args.key).ok_or_else(|| {
+        ChainError::Config(format!(
             "Unknown config key '{}'. Valid keys: {}",
             args.key,
             CONFIGURABLE_KEYS
@@ -90,7 +100,8 @@ fn set(
                 .map(|(k, _, _)| *k)
                 .collect::<Vec<_>>()
                 .join(", ")
-        )))?;
+        ))
+    })?;
 
     let mut entries = read_config_file(env_path);
     if let Some(entry) = entries.iter_mut().find(|(k, _)| k == env_var) {
@@ -122,8 +133,8 @@ fn get(
     output_mode: OutputMode,
     config: &AppConfig,
 ) -> Result<ExitCode> {
-    let (key, env_var, sensitive) =
-        find_key(&args.key).ok_or_else(|| ChainError::Config(format!(
+    let (key, env_var, sensitive) = find_key(&args.key).ok_or_else(|| {
+        ChainError::Config(format!(
             "Unknown config key '{}'. Valid keys: {}",
             args.key,
             CONFIGURABLE_KEYS
@@ -131,7 +142,8 @@ fn get(
                 .map(|(k, _, _)| *k)
                 .collect::<Vec<_>>()
                 .join(", ")
-        )))?;
+        ))
+    })?;
 
     // Read from config file first, then fall back to env var.
     let entries = read_config_file(env_path);
@@ -203,8 +215,8 @@ fn unset(
     output_mode: OutputMode,
     config: &AppConfig,
 ) -> Result<ExitCode> {
-    let (key, env_var, _sensitive) =
-        find_key(&args.key).ok_or_else(|| ChainError::Config(format!(
+    let (key, env_var, _sensitive) = find_key(&args.key).ok_or_else(|| {
+        ChainError::Config(format!(
             "Unknown config key '{}'. Valid keys: {}",
             args.key,
             CONFIGURABLE_KEYS
@@ -212,7 +224,8 @@ fn unset(
                 .map(|(k, _, _)| *k)
                 .collect::<Vec<_>>()
                 .join(", ")
-        )))?;
+        ))
+    })?;
 
     let mut entries = read_config_file(env_path);
     let before_len = entries.len();
@@ -248,4 +261,21 @@ fn unset(
         output_mode,
         OutputContext::new(config.chain_id, false),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn write_config_file_uses_owner_only_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.env");
+
+        write_config_file(&path, &[("DODO_API_KEY".to_string(), "secret".to_string())]).unwrap();
+
+        let mode = std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 }
