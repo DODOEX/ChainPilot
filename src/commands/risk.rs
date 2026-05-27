@@ -73,16 +73,6 @@ async fn token_risk(
     let mut signals = Vec::new();
     let mut overall_risk = RiskLevel::Low;
 
-    if info.total_supply_display < 1_000_000.0 {
-        signals.push(RiskSignal {
-            signal: "low_total_supply".to_string(),
-            description: "Total supply is very low, may indicate thin liquidity".to_string(),
-            severity: RiskLevel::High,
-            value: serde_json::json!({ "supply": info.total_supply_display }),
-        });
-        overall_risk = RiskLevel::High;
-    }
-
     if info.decimals == 0 {
         signals.push(RiskSignal {
             signal: "zero_decimals".to_string(),

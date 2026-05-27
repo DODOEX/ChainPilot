@@ -188,6 +188,16 @@ mod tests {
     /// Build a QuoteStore backed by a unique temp directory.
     fn temp_store() -> (QuoteStore, PathBuf) {
         let dir = std::env::temp_dir().join(format!("chain_test_{}", Uuid::new_v4()));
+        let (
+            coingecko_api_url,
+            coingecko_api_key,
+            dexscreener_api_url,
+            okx_dex_api_url,
+            okx_api_key,
+            okx_api_secret,
+            okx_api_passphrase,
+            okx_project_id,
+        ) = crate::config::test_metadata_config_fields();
         let config = AppConfig {
             rpc_url: "https://test.example.com".to_string(),
             rpc_url_overridden: false,
@@ -200,6 +210,14 @@ mod tests {
             dodo_api_url: String::new(),
             dodo_api_key: String::new(),
             dodo_project_id: String::new(),
+            coingecko_api_url,
+            coingecko_api_key,
+            dexscreener_api_url,
+            okx_dex_api_url,
+            okx_api_key,
+            okx_api_secret,
+            okx_api_passphrase,
+            okx_project_id,
             data_dir: dir.clone(),
         };
         let store = QuoteStore::new(&config).expect("create store");
@@ -259,9 +277,17 @@ mod tests {
             name: name.to_string(),
             decimals,
             chain_id,
-            total_supply: "0".to_string(),
-            total_supply_display: 0.0,
-            source: "on-chain".to_string(),
+            chain: None,
+            website: None,
+            social_links: crate::models::token::TokenSocialLinks::default(),
+            price: None,
+            market_cap: None,
+            fdv: None,
+            primary_liquidity: None,
+            volume_24h: None,
+            price_change_24h: None,
+            risk_level: None,
+            metadata_sources: crate::models::token::TokenMetadataSources::default(),
         }
     }
 

@@ -9,6 +9,9 @@ pub const DEFAULT_CHAIN_ID: u64 = 1;
 /// Fallback RPC used only when no chain config matches the active chain_id.
 const FALLBACK_RPC_URL: &str = "https://ethereum-rpc.publicnode.com";
 pub const DEFAULT_DODO_API_URL: &str = "https://api.dodoex.io/route-service/v2/widget/getdodoroute";
+pub const DEFAULT_COINGECKO_API_URL: &str = "https://api.coingecko.com/api/v3";
+pub const DEFAULT_DEXSCREENER_API_URL: &str = "https://api.dexscreener.com/latest/dex";
+pub const DEFAULT_OKX_DEX_API_URL: &str = "https://web3.okx.com";
 pub const DEFAULT_KEYSTORE_PASSWORD_ENV: &str = "KEYSTORE_PASSWORD";
 
 /// Compile-time default: set `DODO_API_KEY` at build time to bake a key into the binary.
@@ -43,6 +46,14 @@ pub struct AppConfig {
     /// Project ID for the DODO tokenlist API (`/config-center/user/tokenlist/v2`).
     /// Set via `DODO_PROJECT_ID`. Without this, tokenlist lookup is skipped.
     pub dodo_project_id: String,
+    pub coingecko_api_url: String,
+    pub coingecko_api_key: Option<String>,
+    pub dexscreener_api_url: String,
+    pub okx_dex_api_url: String,
+    pub okx_api_key: Option<String>,
+    pub okx_api_secret: Option<String>,
+    pub okx_api_passphrase: Option<String>,
+    pub okx_project_id: Option<String>,
     pub data_dir: PathBuf,
 }
 
@@ -84,6 +95,18 @@ impl AppConfig {
         let dodo_project_id = std::env::var("DODO_PROJECT_ID")
             .unwrap_or_else(|_| DEFAULT_DODO_PROJECT_ID.to_string());
 
+        let coingecko_api_url = std::env::var("COINGECKO_API_URL")
+            .unwrap_or_else(|_| DEFAULT_COINGECKO_API_URL.to_string());
+        let coingecko_api_key = std::env::var("COINGECKO_API_KEY").ok();
+        let dexscreener_api_url = std::env::var("DEXSCREENER_API_URL")
+            .unwrap_or_else(|_| DEFAULT_DEXSCREENER_API_URL.to_string());
+        let okx_dex_api_url = std::env::var("OKX_DEX_API_URL")
+            .unwrap_or_else(|_| DEFAULT_OKX_DEX_API_URL.to_string());
+        let okx_api_key = std::env::var("OKX_API_KEY").ok();
+        let okx_api_secret = std::env::var("OKX_API_SECRET").ok();
+        let okx_api_passphrase = std::env::var("OKX_API_PASSPHRASE").ok();
+        let okx_project_id = std::env::var("OKX_PROJECT_ID").ok();
+
         Ok(Self {
             rpc_url,
             rpc_url_overridden,
@@ -96,6 +119,14 @@ impl AppConfig {
             dodo_api_url,
             dodo_api_key,
             dodo_project_id,
+            coingecko_api_url,
+            coingecko_api_key,
+            dexscreener_api_url,
+            okx_dex_api_url,
+            okx_api_key,
+            okx_api_secret,
+            okx_api_passphrase,
+            okx_project_id,
             data_dir,
         })
     }
@@ -147,6 +178,29 @@ impl AppConfig {
     pub fn custom_tokens_path(&self) -> PathBuf {
         self.data_dir.join("custom_tokens.json")
     }
+}
+
+#[cfg(test)]
+pub fn test_metadata_config_fields() -> (
+    String,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    (
+        DEFAULT_COINGECKO_API_URL.to_string(),
+        None,
+        DEFAULT_DEXSCREENER_API_URL.to_string(),
+        DEFAULT_OKX_DEX_API_URL.to_string(),
+        None,
+        None,
+        None,
+        None,
+    )
 }
 
 #[cfg(test)]
@@ -333,6 +387,33 @@ mod tests {
                 assert_eq!(cfg.dodo_api_url, "https://custom-dodo.example.com");
                 assert_eq!(cfg.dodo_api_key, "my-key");
                 assert_eq!(cfg.dodo_project_id, "proj-42");
+            },
+        );
+    }
+
+    #[test]
+    fn token_metadata_fields_read_from_env() {
+        with_env(
+            &[
+                ("COINGECKO_API_URL", Some("https://cg.example.com")),
+                ("COINGECKO_API_KEY", Some("cg-key")),
+                ("DEXSCREENER_API_URL", Some("https://dex.example.com")),
+                ("OKX_DEX_API_URL", Some("https://okx.example.com")),
+                ("OKX_API_KEY", Some("okx-key")),
+                ("OKX_API_SECRET", Some("okx-secret")),
+                ("OKX_API_PASSPHRASE", Some("okx-pass")),
+                ("OKX_PROJECT_ID", Some("okx-project")),
+            ],
+            || {
+                let cfg = AppConfig::load().unwrap();
+                assert_eq!(cfg.coingecko_api_url, "https://cg.example.com");
+                assert_eq!(cfg.coingecko_api_key.as_deref(), Some("cg-key"));
+                assert_eq!(cfg.dexscreener_api_url, "https://dex.example.com");
+                assert_eq!(cfg.okx_dex_api_url, "https://okx.example.com");
+                assert_eq!(cfg.okx_api_key.as_deref(), Some("okx-key"));
+                assert_eq!(cfg.okx_api_secret.as_deref(), Some("okx-secret"));
+                assert_eq!(cfg.okx_api_passphrase.as_deref(), Some("okx-pass"));
+                assert_eq!(cfg.okx_project_id.as_deref(), Some("okx-project"));
             },
         );
     }

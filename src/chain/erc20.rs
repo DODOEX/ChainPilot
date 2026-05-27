@@ -6,7 +6,7 @@ use alloy_sol_types::sol;
 
 use crate::chain::OnChainClient;
 use crate::error::{ChainError, Result};
-use crate::models::token::{TokenContract, TokenInfo};
+use crate::models::token::{TokenContract, TokenInfo, TokenMetadataSources, TokenSocialLinks};
 
 sol! {
     #[sol(rpc)]
@@ -14,7 +14,6 @@ sol! {
         function name() external view returns (string);
         function symbol() external view returns (string);
         function decimals() external view returns (uint8);
-        function totalSupply() external view returns (uint256);
         function balanceOf(address owner) external view returns (uint256);
         function allowance(address owner, address spender) external view returns (uint256);
     }
@@ -53,15 +52,6 @@ pub async fn get_token_info(client: &OnChainClient, token_address: Address) -> R
         .call()
         .await
         .map_err(|e| ChainError::Rpc(format!("decimals failed: {:?}", e)))?;
-    let total_supply = erc20
-        .totalSupply()
-        .call()
-        .await
-        .map_err(|e| ChainError::Rpc(format!("totalSupply failed: {:?}", e)))?;
-
-    let total_supply_str = total_supply.to_string();
-    let decimals_u64 = decimals as u64;
-    let total_supply_display = parse_token_amount(&total_supply_str, decimals_u64);
 
     Ok(TokenInfo {
         address: token_address.to_string(),
@@ -69,9 +59,22 @@ pub async fn get_token_info(client: &OnChainClient, token_address: Address) -> R
         name,
         decimals,
         chain_id: client.chain_id,
-        total_supply: total_supply_str,
-        total_supply_display,
-        source: "on-chain".to_string(),
+        chain: crate::config::chain_config(client.chain_id).map(|c| c.name.to_string()),
+        website: None,
+        social_links: TokenSocialLinks::default(),
+        price: None,
+        market_cap: None,
+        fdv: None,
+        primary_liquidity: None,
+        volume_24h: None,
+        price_change_24h: None,
+        risk_level: None,
+        metadata_sources: TokenMetadataSources {
+            identity: Some("on-chain".to_string()),
+            address: Some("resolver".to_string()),
+            chain: crate::config::chain_config(client.chain_id).map(|_| "chain-config".to_string()),
+            ..TokenMetadataSources::default()
+        },
     })
 }
 
@@ -159,12 +162,6 @@ pub async fn inspect_token_contract(
         deployed_at_block: None,
         is_verified: None,
     })
-}
-
-fn parse_token_amount(raw: &str, decimals: u64) -> f64 {
-    let raw_uint: u128 = raw.parse().unwrap_or(0);
-    let divisor = 10u128.pow(decimals as u32) as f64;
-    raw_uint as f64 / divisor
 }
 
 fn address_from_storage(storage: U256) -> Address {
