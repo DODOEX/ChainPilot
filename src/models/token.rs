@@ -14,7 +14,7 @@ pub struct TokenInfo {
     pub price: Option<f64>,
     pub market_cap: Option<f64>,
     pub fdv: Option<f64>,
-    pub primary_liquidity: Option<f64>,
+    pub top_liquidity: Option<f64>,
     pub volume_24h: Option<f64>,
     pub price_change_24h: Option<f64>,
     pub risk_level: Option<String>,
@@ -35,7 +35,7 @@ pub struct TokenSearchCandidate {
     pub name: Option<String>,
     pub address: Option<String>,
     pub chain: Option<String>,
-    pub primary_liquidity: Option<f64>,
+    pub top_liquidity: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -56,7 +56,7 @@ pub struct TokenInfoSources {
     pub price: Option<String>,
     pub market_cap: Option<String>,
     pub fdv: Option<String>,
-    pub primary_liquidity: Option<String>,
+    pub top_liquidity: Option<String>,
     pub volume_24h: Option<String>,
     pub price_change_24h: Option<String>,
     pub risk_level: Option<String>,
@@ -84,6 +84,24 @@ pub struct TokenPriceSources {
     pub price_change_7d: Option<String>,
     pub high_24h: Option<String>,
     pub low_24h: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenLiquidity {
+    pub address: String,
+    pub symbol: String,
+    pub chain_id: u64,
+    pub top_liquidity: Option<f64>,
+    pub pair_count: usize,
+    pub top_pair: Option<TokenLiquidityTopPair>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenLiquidityTopPair {
+    pub pair_address: String,
+    pub dex: String,
+    pub liquidity: Option<f64>,
+    pub volume_24h: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

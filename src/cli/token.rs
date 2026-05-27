@@ -15,6 +15,8 @@ pub enum TokenAction {
     Contract(TokenIdentArg),
     /// Real-time price, % changes, and 24h high/low (CoinGecko primary, DexScreener fallback)
     Price(TokenIdentArg),
+    /// Liquidity overview: top liquidity, pair count, top pair details (DexScreener)
+    Liquidity(TokenIdentArg),
     /// Save a custom token so later symbol lookups can resolve it
     Add(TokenAddArgs),
 }

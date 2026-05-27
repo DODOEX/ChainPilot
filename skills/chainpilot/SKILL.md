@@ -323,6 +323,24 @@ CoinGecko has no value (e.g. long-tail tokens not listed there).
 The JSON output includes a `sources` map indicating which API supplied each field, so callers can
 distinguish CoinGecko-backed values from DexScreener-backed ones.
 
+### `token liquidity`
+
+```bash
+chainpilot [--chain-id <N>] token liquidity <TOKEN>
+```
+
+Liquidity overview from DexScreener: top liquidity across all pairs, pair count,
+and top pair details (DEX, pair address, 24h volume).
+
+| Field | Source | Notes |
+|---|---|---|
+| `top_liquidity` | DexScreener | Highest single-pair liquidity (USD) |
+| `pair_count` | DexScreener | Number of matching base-token pairs |
+| `top_pair.dex` | DexScreener | DEX ID of the top pair (e.g. `uniswap`) |
+| `top_pair.pair_address` | DexScreener | Contract address of the top pair |
+| `top_pair.liquidity` | DexScreener | Top pair's liquidity (USD) |
+| `top_pair.volume_24h` | DexScreener | Top pair's 24h trading volume (USD) |
+
 ### `token add`
 
 ```bash

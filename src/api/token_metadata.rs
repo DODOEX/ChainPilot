@@ -37,7 +37,7 @@ struct TokenMetadataPatch {
     price: Option<(f64, String)>,
     market_cap: Option<(f64, String)>,
     fdv: Option<(f64, String)>,
-    primary_liquidity: Option<(f64, String)>,
+    top_liquidity: Option<(f64, String)>,
     volume_24h: Option<(f64, String)>,
     price_change_24h: Option<(f64, String)>,
     risk_level: Option<(String, String)>,
@@ -111,11 +111,21 @@ struct DexScreenerPair {
     price_usd: Option<String>,
     #[serde(rename = "priceChange")]
     price_change: Option<DexScreenerPriceChange>,
+    #[serde(rename = "dexId")]
+    dex_id: Option<String>,
+    #[serde(rename = "pairAddress")]
+    pair_address: Option<String>,
+    volume: Option<DexScreenerVolume>,
 }
 
 #[derive(Debug, Deserialize)]
 struct DexScreenerPriceChange {
     h1: Option<f64>,
+    h24: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DexScreenerVolume {
     h24: Option<f64>,
 }
 
@@ -259,6 +269,87 @@ impl TokenMetadataClient {
         price
     }
 
+    pub async fn fetch_liquidity(
+        &self,
+        chain_id: u64,
+        address: &str,
+        symbol: &str,
+    ) -> crate::models::token::TokenLiquidity {
+        use crate::models::token::{TokenLiquidity, TokenLiquidityTopPair};
+
+        let is_native = address.eq_ignore_ascii_case(crate::config::chains::NATIVE_ADDR);
+        let dexscreener_addr = if is_native {
+            crate::config::chain_config(chain_id)
+                .map(|c| c.native_token.wrapped_address)
+                .unwrap_or(address)
+        } else {
+            address
+        };
+
+        let pairs = match self.fetch_dexscreener(dexscreener_addr).await {
+            Ok(resp) => resp.pairs.unwrap_or_default(),
+            Err(_) => {
+                return TokenLiquidity {
+                    address: address.to_string(),
+                    symbol: symbol.to_string(),
+                    chain_id,
+                    top_liquidity: None,
+                    pair_count: 0,
+                    top_pair: None,
+                };
+            }
+        };
+
+        let matching: Vec<&DexScreenerPair> = pairs
+            .iter()
+            .filter(|p| {
+                p.base_token
+                    .as_ref()
+                    .and_then(|t| t.address.as_deref())
+                    .is_some_and(|a| a.eq_ignore_ascii_case(dexscreener_addr))
+            })
+            .collect();
+
+        let top_liquidity = matching
+            .iter()
+            .filter_map(|p| p.liquidity.as_ref().and_then(|l| l.usd))
+            .fold(0.0f64, f64::max);
+        let top_liquidity = if top_liquidity > 0.0 {
+            Some(top_liquidity)
+        } else {
+            None
+        };
+
+        let top_pair = matching
+            .iter()
+            .max_by(|a, b| {
+                let la = a.liquidity.as_ref().and_then(|l| l.usd).unwrap_or(0.0);
+                let lb = b.liquidity.as_ref().and_then(|l| l.usd).unwrap_or(0.0);
+                la.partial_cmp(&lb).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .and_then(|p| {
+                let pair_address = p.pair_address.clone()?;
+                let dex = p.dex_id.clone().unwrap_or_else(|| "unknown".to_string());
+                let liquidity = p.liquidity.as_ref().and_then(|l| l.usd);
+                let volume_24h = p.volume.as_ref().and_then(|v| v.h24);
+                Some(TokenLiquidityTopPair {
+                    pair_address,
+                    dex,
+                    liquidity,
+                    volume_24h,
+                })
+            });
+
+        TokenLiquidity {
+            address: address.to_string(),
+            symbol: symbol.to_string(),
+            chain_id,
+            top_liquidity,
+            pair_count: matching.len(),
+            top_pair,
+        }
+    }
+
     pub async fn search_symbol(&self, query: &str, chain_id: u64) -> TokenSearchResult {
         let mut candidates = Vec::new();
 
@@ -318,7 +409,7 @@ impl TokenMetadataClient {
                     name: non_empty(coin.name),
                     address,
                     chain: Some(platform.to_string()),
-                    primary_liquidity: None,
+                    top_liquidity: None,
                 })
             })
             .take(3)
@@ -362,7 +453,7 @@ impl TokenMetadataClient {
                     name: non_empty(token.name),
                     address: non_empty(token.address),
                     chain: None,
-                    primary_liquidity: pair.liquidity.and_then(|liquidity| liquidity.usd),
+                    top_liquidity: pair.liquidity.and_then(|liquidity| liquidity.usd),
                 })
             })
             .take(3)
@@ -434,7 +525,7 @@ impl TokenMetadataClient {
                     name: non_empty(token.token_name),
                     address: non_empty(token.token_contract_address),
                     chain: Some(chain_id.to_string()),
-                    primary_liquidity: None,
+                    top_liquidity: None,
                 })
             })
             .take(3)
@@ -665,7 +756,7 @@ fn apply_dexscreener(
         }
     }
     if let Some(value) = pair.liquidity.and_then(|v| v.usd) {
-        patch.primary_liquidity = Some((value, "dexscreener".to_string()));
+        patch.top_liquidity = Some((value, "dexscreener".to_string()));
     }
 }
 
@@ -835,9 +926,9 @@ fn apply_patch(info: &mut TokenInfo, patch: TokenMetadataPatch) {
         info.fdv = Some(value);
         sources.fdv = Some(source);
     }
-    if let Some((value, source)) = patch.primary_liquidity {
-        info.primary_liquidity = Some(value);
-        sources.primary_liquidity = Some(source);
+    if let Some((value, source)) = patch.top_liquidity {
+        info.top_liquidity = Some(value);
+        sources.top_liquidity = Some(source);
     }
     if let Some((value, source)) = patch.volume_24h {
         info.volume_24h = Some(value);
@@ -936,6 +1027,9 @@ mod tests {
                         liquidity: Some(DexScreenerLiquidity { usd: Some(10.0) }),
                         price_usd: None,
                         price_change: None,
+                        dex_id: None,
+                        pair_address: None,
+                        volume: None,
                     },
                     DexScreenerPair {
                         base_token: Some(DexScreenerToken {
@@ -946,6 +1040,9 @@ mod tests {
                         liquidity: Some(DexScreenerLiquidity { usd: Some(20.0) }),
                         price_usd: None,
                         price_change: None,
+                        dex_id: None,
+                        pair_address: None,
+                        volume: None,
                     },
                 ]),
             }),
@@ -953,7 +1050,7 @@ mod tests {
         );
 
         assert_eq!(patch.name.unwrap().0, "High");
-        assert_eq!(patch.primary_liquidity.unwrap().0, 20.0);
+        assert_eq!(patch.top_liquidity.unwrap().0, 20.0);
         assert!(patch.price.is_none());
         assert!(patch.volume_24h.is_none());
         assert!(patch.price_change_24h.is_none());
@@ -974,13 +1071,16 @@ mod tests {
                     liquidity: Some(DexScreenerLiquidity { usd: Some(20.0) }),
                     price_usd: None,
                     price_change: None,
+                    dex_id: None,
+                    pair_address: None,
+                    volume: None,
                 }]),
             }),
             "0xabc",
         );
 
         assert_eq!(patch.name.unwrap().0, "Wrong Chain");
-        assert_eq!(patch.primary_liquidity.unwrap().0, 20.0);
+        assert_eq!(patch.top_liquidity.unwrap().0, 20.0);
         assert!(patch.price.is_none());
     }
 
@@ -1056,6 +1156,9 @@ mod tests {
                         h1: Some(0.7),
                         h24: Some(99.0),
                     }),
+                    dex_id: None,
+                    pair_address: None,
+                    volume: None,
                 }]),
             }),
             "0xabc",
@@ -1090,6 +1193,9 @@ mod tests {
                         h1: Some(-1.0),
                         h24: Some(5.0),
                     }),
+                    dex_id: None,
+                    pair_address: None,
+                    volume: None,
                 }]),
             }),
             "0xabc",

@@ -283,7 +283,7 @@ mod tests {
             price: None,
             market_cap: None,
             fdv: None,
-            primary_liquidity: None,
+            top_liquidity: None,
             volume_24h: None,
             price_change_24h: None,
             risk_level: None,
