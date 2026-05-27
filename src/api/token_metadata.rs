@@ -741,7 +741,7 @@ fn apply_okx(patch: &mut TokenMetadataPatch, token: Option<OkxToken>) {
 }
 
 fn apply_patch(info: &mut TokenInfo, patch: TokenMetadataPatch) {
-    let mut sources = info.metadata_sources.clone();
+    let mut sources = info.sources.clone();
 
     if let Some((value, source)) = patch.name {
         info.name = value;
@@ -752,8 +752,10 @@ fn apply_patch(info: &mut TokenInfo, patch: TokenMetadataPatch) {
         sources.identity.get_or_insert(source);
     }
     if let Some((value, source)) = patch.address {
-        info.address = value;
-        sources.address = Some(source);
+        if info.address != value {
+            info.address = value;
+            sources.identity.get_or_insert(source);
+        }
     }
     if let Some((value, source)) = patch.website {
         info.website = Some(value);
@@ -792,7 +794,7 @@ fn apply_patch(info: &mut TokenInfo, patch: TokenMetadataPatch) {
         sources.risk_level = Some(source);
     }
 
-    info.metadata_sources = sources;
+    info.sources = sources;
 }
 
 fn coingecko_platform_id(chain_id: u64) -> Option<&'static str> {
