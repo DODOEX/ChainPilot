@@ -296,6 +296,7 @@ impl TokenMetadataClient {
                     top_liquidity: None,
                     pair_count: 0,
                     top_pair: None,
+                    sources: crate::models::token::TokenLiquiditySources::default(),
                 };
             }
         };
@@ -340,6 +341,18 @@ impl TokenMetadataClient {
                 })
             });
 
+        use crate::models::token::TokenLiquiditySources;
+
+        let src = if matching.is_empty() {
+            TokenLiquiditySources::default()
+        } else {
+            TokenLiquiditySources {
+                top_liquidity: Some("dexscreener".to_string()),
+                pair_count: Some("dexscreener".to_string()),
+                top_pair: Some("dexscreener".to_string()),
+            }
+        };
+
         TokenLiquidity {
             address: address.to_string(),
             symbol: symbol.to_string(),
@@ -347,6 +360,7 @@ impl TokenMetadataClient {
             top_liquidity,
             pair_count: matching.len(),
             top_pair,
+            sources: src,
         }
     }
 
