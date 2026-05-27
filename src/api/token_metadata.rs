@@ -175,6 +175,30 @@ struct OkxTagList {
     community_recognized: Option<bool>,
 }
 
+#[derive(Debug, Deserialize)]
+struct OkxRiskToken {
+    #[serde(rename = "tokenContractAddress")]
+    token_contract_address: Option<String>,
+    #[serde(rename = "riskLevel")]
+    risk_level: Option<String>,
+    #[serde(rename = "riskScore")]
+    risk_score: Option<f64>,
+    #[serde(rename = "isHoneypot")]
+    is_honeypot: Option<bool>,
+    #[serde(rename = "isBlacklist")]
+    is_blacklist: Option<bool>,
+    #[serde(rename = "isTransferRestrict")]
+    is_transfer_restrict: Option<bool>,
+    #[serde(rename = "isMintable")]
+    is_mintable: Option<bool>,
+    #[serde(rename = "isOwnerPrivileged")]
+    is_owner_privileged: Option<bool>,
+    #[serde(rename = "buyTax")]
+    buy_tax: Option<f64>,
+    #[serde(rename = "sellTax")]
+    sell_tax: Option<f64>,
+}
+
 impl TokenMetadataClient {
     pub fn new(client: Client, config: &AppConfig) -> Self {
         Self {
@@ -362,6 +386,138 @@ impl TokenMetadataClient {
             top_pair,
             sources: src,
         }
+    }
+
+    pub async fn fetch_risk(
+        &self,
+        chain_id: u64,
+        address: &str,
+        symbol: &str,
+    ) -> crate::models::token::TokenRisk {
+        use crate::models::token::{TokenRisk, TokenRiskSources};
+
+        let is_native = address.eq_ignore_ascii_case(crate::config::chains::NATIVE_ADDR);
+
+        // Native tokens are inherently low-risk
+        if is_native {
+            return TokenRisk {
+                address: address.to_string(),
+                symbol: symbol.to_string(),
+                chain_id,
+                risk_level: Some("low".to_string()),
+                risk_score: Some(0.0),
+                honeypot: Some(false),
+                blacklist: Some(false),
+                transfer_restricted: Some(false),
+                mintable: Some(false),
+                owner_privileged: Some(false),
+                tax_buy: Some(0.0),
+                tax_sell: Some(0.0),
+                sources: TokenRiskSources {
+                    risk_level: Some("chain-config".to_string()),
+                    risk_score: Some("chain-config".to_string()),
+                    honeypot: Some("chain-config".to_string()),
+                    blacklist: Some("chain-config".to_string()),
+                    transfer_restricted: Some("chain-config".to_string()),
+                    mintable: Some("chain-config".to_string()),
+                    owner_privileged: Some("chain-config".to_string()),
+                    tax_buy: Some("chain-config".to_string()),
+                    tax_sell: Some("chain-config".to_string()),
+                },
+            };
+        }
+
+        let okx = self.fetch_okx_risk(chain_id, address).await;
+
+        let mut risk = TokenRisk {
+            address: address.to_string(),
+            symbol: symbol.to_string(),
+            chain_id,
+            risk_level: None,
+            risk_score: None,
+            honeypot: None,
+            blacklist: None,
+            transfer_restricted: None,
+            mintable: None,
+            owner_privileged: None,
+            tax_buy: None,
+            tax_sell: None,
+            sources: TokenRiskSources::default(),
+        };
+
+        if let Some(data) = okx {
+            let src = "okx-onchainos";
+            macro_rules! set {
+                ($model:ident, $val:expr) => {
+                    if risk.$model.is_none() {
+                        risk.$model = Some($val);
+                        risk.sources.$model = Some(src.to_string());
+                    }
+                };
+            }
+            if let Some(v) = data.risk_level { set!(risk_level, v); }
+            if let Some(v) = data.risk_score { set!(risk_score, v); }
+            if let Some(v) = data.is_honeypot { set!(honeypot, v); }
+            if let Some(v) = data.is_blacklist { set!(blacklist, v); }
+            if let Some(v) = data.is_transfer_restrict { set!(transfer_restricted, v); }
+            if let Some(v) = data.is_mintable { set!(mintable, v); }
+            if let Some(v) = data.is_owner_privileged { set!(owner_privileged, v); }
+            if let Some(v) = data.buy_tax { set!(tax_buy, v); }
+            if let Some(v) = data.sell_tax { set!(tax_sell, v); }
+        }
+
+        risk
+    }
+
+    async fn fetch_okx_risk(
+        &self,
+        chain_id: u64,
+        address: &str,
+    ) -> Option<OkxRiskToken> {
+        let api_key = self.okx_api_key.as_ref()?;
+        let secret = self.okx_api_secret.as_ref()?;
+        let passphrase = self.okx_api_passphrase.as_ref()?;
+        let request_path = "/api/v6/dex/market/token/risk";
+        let body = serde_json::json!([
+            {
+                "chainIndex": chain_id.to_string(),
+                "tokenContractAddress": address,
+            }
+        ])
+        .to_string();
+        let timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let signature = okx_signature(&timestamp, "POST", request_path, &body, secret).ok()?;
+        let url = format!("{}{}", self.okx_base_url, request_path);
+
+        let mut req = self
+            .client
+            .post(url)
+            .timeout(Duration::from_secs(8))
+            .header("OK-ACCESS-KEY", api_key)
+            .header("OK-ACCESS-SIGN", signature)
+            .header("OK-ACCESS-TIMESTAMP", timestamp)
+            .header("OK-ACCESS-PASSPHRASE", passphrase)
+            .body(body);
+        if let Some(project_id) = &self.okx_project_id {
+            req = req.header("OK-ACCESS-PROJECT", project_id);
+        }
+
+        let envelope = req
+            .send()
+            .await
+            .ok()?
+            .error_for_status()
+            .ok()?
+            .json::<OkxEnvelope<Vec<OkxRiskToken>>>()
+            .await
+            .ok()?;
+
+        envelope.data?.into_iter().find(|token| {
+            token
+                .token_contract_address
+                .as_deref()
+                .is_some_and(|a| a.eq_ignore_ascii_case(address))
+        })
     }
 
     pub async fn search_symbol(&self, query: &str, chain_id: u64) -> TokenSearchResult {

@@ -113,6 +113,36 @@ pub struct TokenLiquidityTopPair {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenRisk {
+    pub address: String,
+    pub symbol: String,
+    pub chain_id: u64,
+    pub risk_level: Option<String>,
+    pub risk_score: Option<f64>,
+    pub honeypot: Option<bool>,
+    pub blacklist: Option<bool>,
+    pub transfer_restricted: Option<bool>,
+    pub mintable: Option<bool>,
+    pub owner_privileged: Option<bool>,
+    pub tax_buy: Option<f64>,
+    pub tax_sell: Option<f64>,
+    pub sources: TokenRiskSources,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TokenRiskSources {
+    pub risk_level: Option<String>,
+    pub risk_score: Option<String>,
+    pub honeypot: Option<String>,
+    pub blacklist: Option<String>,
+    pub transfer_restricted: Option<String>,
+    pub mintable: Option<String>,
+    pub owner_privileged: Option<String>,
+    pub tax_buy: Option<String>,
+    pub tax_sell: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenContract {
     pub address: String,
     pub chain_id: u64,
