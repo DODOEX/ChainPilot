@@ -18,7 +18,7 @@ pub struct TokenInfo {
     pub volume_24h: Option<f64>,
     pub price_change_24h: Option<f64>,
     pub risk_level: Option<String>,
-    pub metadata_sources: TokenMetadataSources,
+    pub sources: TokenInfoSources,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,9 +48,8 @@ pub struct TokenSocialLinks {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TokenMetadataSources {
+pub struct TokenInfoSources {
     pub identity: Option<String>,
-    pub address: Option<String>,
     pub chain: Option<String>,
     pub website: Option<String>,
     pub social_links: Option<String>,

@@ -287,7 +287,7 @@ mod tests {
             volume_24h: None,
             price_change_24h: None,
             risk_level: None,
-            metadata_sources: crate::models::token::TokenMetadataSources::default(),
+            sources: crate::models::token::TokenInfoSources::default(),
         }
     }
 

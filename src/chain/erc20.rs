@@ -6,7 +6,7 @@ use alloy_sol_types::{sol, SolCall};
 
 use crate::chain::OnChainClient;
 use crate::error::{ChainError, Result};
-use crate::models::token::{TokenContract, TokenInfo, TokenMetadataSources, TokenSocialLinks};
+use crate::models::token::{TokenContract, TokenInfo, TokenInfoSources, TokenSocialLinks};
 
 sol! {
     #[sol(rpc)]
@@ -71,11 +71,10 @@ pub async fn get_token_info(client: &OnChainClient, token_address: Address) -> R
         volume_24h: None,
         price_change_24h: None,
         risk_level: None,
-        metadata_sources: TokenMetadataSources {
+        sources: TokenInfoSources {
             identity: Some("on-chain".to_string()),
-            address: Some("resolver".to_string()),
             chain: crate::config::chain_config(client.chain_id).map(|_| "chain-config".to_string()),
-            ..TokenMetadataSources::default()
+            ..TokenInfoSources::default()
         },
     })
 }
