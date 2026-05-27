@@ -68,8 +68,8 @@ the user explicitly asks for a different one.
 
 Runtime env vars are intentionally limited to `PRIVATE_KEY`, `KEYSTORE_PATH`,
 `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`,
-`WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`, and
-`DODO_API_URL`.
+`WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`,
+`DODO_API_URL`, `OKX_API_KEY`, `OKX_API_SECRET`, and `OKX_API_PASSPHRASE`.
 
 Config precedence: CLI flag > env var > `.env` file > compile-time default.
 
@@ -349,6 +349,10 @@ chainpilot [--chain-id <N>] token risk <TOKEN>
 
 Token risk analysis from OKX OnchainOS: honeypot detection, blacklist status,
 transfer restrictions, minting, owner privileges, and buy/sell tax.
+
+> **Requires OKX credentials**: Set `OKX_API_KEY`, `OKX_API_SECRET`, and
+> `OKX_API_PASSPHRASE` environment variables. Without them all risk fields
+> return `null`. Native tokens (ETH, BNB, etc.) do not require credentials.
 
 | Field | Source | Notes |
 |---|---|---|
