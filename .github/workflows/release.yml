@@ -71,13 +71,29 @@ jobs:
           fi
 
           if [[ "$is_main" == "true" && "$prerelease" == "true" ]]; then
-            echo "main branch cannot publish prerelease versions: $version" >&2
-            exit 1
+            echo "main branch cannot publish prerelease versions: $version — skipping release"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "branch_name=$branch_name" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "cargo_version=$cargo_version" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+            echo "stable=$stable" >> "$GITHUB_OUTPUT"
+            echo "previous_tag=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           if [[ "$is_main" != "true" && "$stable" == "true" ]]; then
-            echo "non-main branch must use prerelease versions with a suffix: $version" >&2
-            exit 1
+            echo "non-main branch must use prerelease versions with a suffix: $version — skipping release"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "branch_name=$branch_name" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "cargo_version=$cargo_version" >> "$GITHUB_OUTPUT"
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+            echo "stable=$stable" >> "$GITHUB_OUTPUT"
+            echo "previous_tag=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
