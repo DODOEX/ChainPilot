@@ -71,7 +71,7 @@ the user explicitly asks for a different one.
 Runtime env vars are intentionally limited to `PRIVATE_KEY`, `KEYSTORE_PATH`,
 `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`,
 `WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`,
-`DODO_API_URL`, `OKX_API_KEY`, `OKX_API_SECRET`, and `OKX_API_PASSPHRASE`.
+and `DODO_API_URL`.
 
 Config precedence: CLI flag > env var > `.env` file > compile-time default.
 
@@ -349,24 +349,21 @@ and top pair details (DEX, pair address, 24h volume).
 chainpilot [--chain-id <N>] token risk <TOKEN>
 ```
 
-Token risk analysis from OKX OnchainOS: honeypot detection, blacklist status,
-transfer restrictions, minting, owner privileges, and buy/sell tax.
-
-> **Requires OKX credentials**: Set `OKX_API_KEY`, `OKX_API_SECRET`, and
-> `OKX_API_PASSPHRASE` environment variables. Without them all risk fields
-> return `null`. Native tokens (ETH, BNB, etc.) do not require credentials.
+Token risk analysis from GoPlus Security: honeypot detection, blacklist status,
+transfer restrictions, minting, owner privileges, and buy/sell tax. Free API,
+no credentials required.
 
 | Field | Source | Notes |
 |---|---|---|
-| `risk_level` | OKX OnchainOS | e.g. `low`, `medium`, `high` |
-| `risk_score` | OKX OnchainOS | Numeric risk score |
-| `honeypot` | OKX OnchainOS | Whether the token is a honeypot |
-| `blacklist` | OKX OnchainOS | Whether the token has a blacklist |
-| `transfer_restricted` | OKX OnchainOS | Whether transfers are restricted |
-| `mintable` | OKX OnchainOS | Whether new tokens can be minted |
-| `owner_privileged` | OKX OnchainOS | Whether owner has special privileges |
-| `tax_buy` | OKX OnchainOS | Buy tax percentage |
-| `tax_sell` | OKX OnchainOS | Sell tax percentage |
+| `risk_level` | GoPlus (derived) | `low`, `medium`, or `high` |
+| `risk_score` | GoPlus (derived) | 0–100 composite score |
+| `honeypot` | GoPlus | Whether the token is a honeypot |
+| `blacklist` | GoPlus | Whether the token has a blacklist |
+| `transfer_restricted` | GoPlus | Whether transfers are pausable |
+| `mintable` | GoPlus | Whether new tokens can be minted |
+| `owner_privileged` | GoPlus | Whether owner can change balances |
+| `tax_buy` | GoPlus | Buy tax percentage |
+| `tax_sell` | GoPlus | Sell tax percentage |
 
 Native tokens (ETH, BNB, etc.) return hardcoded low-risk defaults.
 
@@ -515,6 +512,56 @@ Tokens can be a symbol or a `0x` address. Resolution order:
 | Sepolia Testnet | 11155111 |
 
 For unsupported chain IDs, pass `--rpc-url` manually.
+
+---
+
+## `config` Subcommands
+
+Manage API keys and configuration values. Settings are persisted in a config file
+(`~/.local/share/chain/config.env` on Linux) and take precedence over `.env` file values.
+
+### `config set`
+
+```bash
+chainpilot config set <KEY> <VALUE>
+```
+
+Save an API key or configuration value. The value is written to the persistent config file
+and immediately available in the current session.
+
+### `config get`
+
+```bash
+chainpilot config get <KEY>
+```
+
+Show the current value of a configuration key. Sensitive values are partially masked.
+
+### `config list`
+
+```bash
+chainpilot config list
+```
+
+Show all configurable keys with their current values (sensitive values masked).
+
+### `config unset`
+
+```bash
+chainpilot config unset <KEY>
+```
+
+Remove a configuration key from the config file.
+
+### Configurable Keys
+
+| Key | Env Var | Sensitive | Description |
+|---|---|---|---|
+| `dodo_api_key` | `DODO_API_KEY` | Yes | DODO API key for swap routing |
+| `dodo_project_id` | `DODO_PROJECT_ID` | No | DODO project ID for tokenlist API |
+| `coingecko_api_key` | `COINGECKO_API_KEY` | Yes | CoinGecko API key for price data |
+
+**Config precedence**: CLI flag > `config.env` file > env var / `.env` file > compile-time default.
 
 ---
 

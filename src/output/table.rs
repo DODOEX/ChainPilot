@@ -553,6 +553,54 @@ impl TableRenderable for crate::models::risk::ApprovalRisk {
     }
 }
 
+impl TableRenderable for crate::models::config::ConfigEntry {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Key", &self.key]);
+        let display_value = self
+            .value
+            .as_deref()
+            .unwrap_or("(not set)");
+        table.add_row(vec!["Value", display_value]);
+        if self.masked {
+            table.add_row(vec!["Note", "Sensitive value, partially masked"]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for Vec<crate::models::config::ConfigEntry> {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Key", "Value", "Sensitive"]);
+        for entry in self {
+            let display_value = entry
+                .value
+                .as_deref()
+                .unwrap_or("(not set)");
+            let sensitive = if entry.masked { "Yes" } else { "" };
+            table.add_row(vec![
+                entry.key.as_str(),
+                display_value,
+                sensitive,
+            ]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::config::ConfigStatus {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Key", &self.key]);
+        table.add_row(vec!["Action", &self.action]);
+        table.add_row(vec!["Status", &self.message]);
+        println!("{}", table);
+    }
+}
+
 impl TableRenderable for Vec<crate::models::swap::SwapHistoryRecord> {
     fn render_table(&self) {
         let mut table = Table::new();

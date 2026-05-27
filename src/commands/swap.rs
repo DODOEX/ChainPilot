@@ -1340,16 +1340,8 @@ mod tests {
     }
 
     fn test_config(chain_id: u64) -> AppConfig {
-        let (
-            coingecko_api_url,
-            coingecko_api_key,
-            dexscreener_api_url,
-            okx_dex_api_url,
-            okx_api_key,
-            okx_api_secret,
-            okx_api_passphrase,
-            okx_project_id,
-        ) = crate::config::test_metadata_config_fields();
+        let (coingecko_api_url, coingecko_api_key, dexscreener_api_url) =
+            crate::config::test_metadata_config_fields();
         AppConfig {
             rpc_url: "https://rpc.example.com".to_string(),
             rpc_url_overridden: false,
@@ -1365,11 +1357,6 @@ mod tests {
             coingecko_api_url,
             coingecko_api_key,
             dexscreener_api_url,
-            okx_dex_api_url,
-            okx_api_key,
-            okx_api_secret,
-            okx_api_passphrase,
-            okx_project_id,
             data_dir: std::env::temp_dir().join(format!("chainpilot_test_{}", Uuid::new_v4())),
         }
     }
@@ -1879,16 +1866,8 @@ mod tests {
     #[tokio::test]
     async fn send_approval_with_deps_returns_tx_hash_and_sender() {
         let private_key = "0x59c6995e998f97a5a0044966f0945382dbf7f50a3f2f72f5f7a0b7d7d4f5e5f1";
-        let (
-            coingecko_api_url,
-            coingecko_api_key,
-            dexscreener_api_url,
-            okx_dex_api_url,
-            okx_api_key,
-            okx_api_secret,
-            okx_api_passphrase,
-            okx_project_id,
-        ) = crate::config::test_metadata_config_fields();
+        let (coingecko_api_url, coingecko_api_key, dexscreener_api_url) =
+            crate::config::test_metadata_config_fields();
         let signer = crate::chain::resolve_signer(&AppConfig {
             rpc_url: String::new(),
             rpc_url_overridden: false,
@@ -1904,11 +1883,6 @@ mod tests {
             coingecko_api_url,
             coingecko_api_key,
             dexscreener_api_url,
-            okx_dex_api_url,
-            okx_api_key,
-            okx_api_secret,
-            okx_api_passphrase,
-            okx_project_id,
             data_dir: std::env::temp_dir(),
         })
         .unwrap();
