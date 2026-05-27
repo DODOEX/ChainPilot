@@ -18,5 +18,6 @@ pub static CONFIG: ChainConfig = ChainConfig {
         decimals: 18,
         wrapped_symbol: "WBNB",
         wrapped_address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c",
+        coingecko_id: "binancecoin",
     },
 };
