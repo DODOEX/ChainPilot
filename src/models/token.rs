@@ -94,6 +94,14 @@ pub struct TokenLiquidity {
     pub top_liquidity: Option<f64>,
     pub pair_count: usize,
     pub top_pair: Option<TokenLiquidityTopPair>,
+    pub sources: TokenLiquiditySources,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TokenLiquiditySources {
+    pub top_liquidity: Option<String>,
+    pub pair_count: Option<String>,
+    pub top_pair: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
