@@ -21,7 +21,7 @@ pub enum TokenAction {
     Fee(TokenFeeArgs),
     /// Mint additional supply on a mintable token
     Mint(TokenMintArgs),
-    /// Renounce token ownership by calling abandonOwnership(address(0))
+    /// Renounce token ownership (DODO tokens only, calls abandonOwnership)
     RenounceOwnership(TokenOwnershipArgs),
 }
 

@@ -249,14 +249,17 @@ async fn fee(_args: TokenFeeArgs, config: &AppConfig, output_mode: OutputMode) -
         }
     };
 
-    let native_symbol = config
-        .chain_config_for(chain_id)
+    let chain_cfg = config.chain_config_for(chain_id);
+    let native_symbol = chain_cfg
         .map(|cfg| cfg.native_token.symbol)
         .unwrap_or("ETH");
+    let native_decimals = chain_cfg
+        .map(|cfg| cfg.native_token.decimals)
+        .unwrap_or(18);
     let result = TokenCreateFee {
         chain_id,
         factory: factory.to_string(),
-        fee_display: format_units_to_f64(&fee_raw, 18),
+        fee_display: format_units_to_f64(&fee_raw, native_decimals),
         fee_raw,
         fee_symbol: native_symbol.to_string(),
     };
