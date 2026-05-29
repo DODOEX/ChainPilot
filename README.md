@@ -19,8 +19,7 @@ A command-line tool for on-chain DeFi operations on EVM-compatible networks. Bui
 
 **Homebrew (macOS / Linux):**
 ```bash
-brew tap DODOEX/chainpilot
-brew install chainpilot
+brew install DODOEX/chainpilot/chainpilot
 ```
 
 **AUR (Arch Linux):**
