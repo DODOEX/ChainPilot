@@ -2,11 +2,19 @@
 
 mod erc20;
 mod rpc;
+mod token_factory;
 
-pub use erc20::{get_allowance, get_balance, get_token_info, inspect_token_contract};
+pub use erc20::{
+    encode_abandon_ownership_calldata, encode_mint_calldata, get_allowance, get_balance,
+    get_token_info, inspect_token_contract,
+};
 pub use rpc::{
     address_from_private_key, estimate_gas, get_eth_balance, get_gas_price_gwei, get_nonce,
     get_tx_receipt, resolve_signer, send_tx, TxStatus,
+};
+pub use token_factory::{
+    encode_create_custom_calldata, encode_create_mintable_calldata, encode_create_std_calldata,
+    get_create_fee,
 };
 
 use alloy::network::Ethereum;

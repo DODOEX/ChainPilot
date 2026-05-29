@@ -55,6 +55,15 @@ pub enum ChainError {
     #[error("Unsupported chain ID: {0}. See README for the supported chain list.")]
     UnsupportedChain(u64),
 
+    #[error("Token creation is not supported on chain ID: {0}")]
+    UnsupportedTokenFactoryChain(u64),
+
+    #[error("Missing ERC20V3Factory address for chain ID: {0}")]
+    MissingFactoryAddress(u64),
+
+    #[error("Invalid token creation parameters: {0}")]
+    InvalidTokenCreateParams(String),
+
     #[error("Config error: {0}")]
     Config(String),
 

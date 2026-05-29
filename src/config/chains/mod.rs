@@ -31,6 +31,8 @@ pub struct NativeToken {
 pub struct ChainContracts {
     /// DODOApprove contract. All ERC-20 approvals for DODO swaps target this address.
     pub dodo_approve: &'static str,
+    /// Optional ERC20V3Factory used for DODO token creation flows.
+    pub erc20_v3_factory: Option<&'static str>,
 }
 
 pub struct ChainConfig {

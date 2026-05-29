@@ -6,6 +6,7 @@ pub static CONFIG: ChainConfig = ChainConfig {
     rpc_urls: &["https://rpc.scroll.io"],
     contracts: ChainContracts {
         dodo_approve: "0x20E77aD760eC9E922Fd2dA8847ABFbB2471B92CD",
+        erc20_v3_factory: Some("0x1F076a800005c758a505E759720eb6737136e893"),
     },
     native_token: NativeToken {
         symbol: "ETH",

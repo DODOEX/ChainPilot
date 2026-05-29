@@ -11,6 +11,7 @@ A command-line tool for on-chain DeFi operations on EVM-compatible networks. Bui
 - Execute swaps with optional tx waiting and status polling
 - Manage ERC-20 approvals (approve / revoke)
 - Query token metadata and wallet balances on-chain
+- Create ERC-20 tokens via DODO ERC20V3Factory, mint on mintable tokens, and renounce ownership
 - Risk analysis for tokens, wallets, and approval allowances
 - Machine-readable JSON output (`--json`) for scripting and agent pipelines
 
@@ -270,6 +271,39 @@ chainpilot --chain-id 137 token contract USDC
 # Save a custom token locally for later symbol resolution
 chainpilot token add 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 chainpilot --chain-id 8453 token add 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+
+# Read the token creation fee from the configured ERC20V3Factory
+chainpilot --chain-id 11155111 token fee
+
+# Create a standard token
+chainpilot --chain-id 11155111 token create std \
+  --name "ChainPilot Token" \
+  --symbol CPT \
+  --supply 1000000
+
+# Create a custom token with trade burn / fee ratios
+chainpilot --chain-id 11155111 token create custom \
+  --name "ChainPilot Tax Token" \
+  --symbol CPTX \
+  --supply 1000000 \
+  --burn-pct 0.1 \
+  --fee-pct 1.25
+
+# Create a mintable token
+chainpilot --chain-id 11155111 token create mintable \
+  --name "ChainPilot Mintable" \
+  --symbol CPM \
+  --supply 1000000
+
+# Mint additional supply to a recipient
+chainpilot --chain-id 11155111 token mint \
+  --token 0xYourMintableToken \
+  --to 0xRecipient \
+  --amount 100
+
+# Renounce ownership on a token that supports abandonOwnership(address(0))
+chainpilot --chain-id 11155111 token renounce-ownership \
+  --token 0xYourToken
 ```
 
 ### Wallet

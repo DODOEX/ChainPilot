@@ -158,6 +158,27 @@ impl TableRenderable for crate::models::swap::ApprovalResult {
     }
 }
 
+impl TableRenderable for crate::models::token::TokenOwnershipActionResult {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Dry Run", &self.dry_run.to_string()]);
+        table.add_row(vec!["Action", &self.action]);
+        table.add_row(vec!["Token", &self.token]);
+        if let Some(ref from) = self.from_address {
+            table.add_row(vec!["From", from]);
+        }
+        if let Some(gas) = self.estimated_gas {
+            table.add_row(vec!["Estimated Gas", &gas.to_string()]);
+        }
+        if let Some(ref tx) = self.tx_hash {
+            table.add_row(vec!["TX Hash", tx]);
+        }
+        table.add_row(vec!["Calldata", &self.calldata]);
+        println!("{}", table);
+    }
+}
+
 impl TableRenderable for crate::models::token::TokenContract {
     fn render_table(&self) {
         let mut table = Table::new();
@@ -214,6 +235,79 @@ impl TableRenderable for crate::models::token::CustomTokenRecord {
             "Added At",
             &self.added_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
         ]);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::token::TokenCreateFee {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Factory", &self.factory]);
+        table.add_row(vec![
+            "Create Fee",
+            &format!(
+                "{} {} ({})",
+                self.fee_display, self.fee_symbol, self.fee_raw
+            ),
+        ]);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::token::TokenCreateResult {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Dry Run", &self.dry_run.to_string()]);
+        table.add_row(vec!["Factory", &self.factory]);
+        table.add_row(vec!["Method", &self.method]);
+        table.add_row(vec!["Name", &self.token_name]);
+        table.add_row(vec!["Symbol", &self.token_symbol]);
+        table.add_row(vec!["Decimals", &self.decimals.to_string()]);
+        table.add_row(vec![
+            "Supply",
+            &format!("{} ({})", self.supply_display, self.supply_raw),
+        ]);
+        table.add_row(vec!["Value", &self.value]);
+        if let Some(ref from) = self.from_address {
+            table.add_row(vec!["From", from]);
+        }
+        if let Some(gas) = self.estimated_gas {
+            table.add_row(vec!["Estimated Gas", &gas.to_string()]);
+        }
+        if let Some(ref tx) = self.tx_hash {
+            table.add_row(vec!["TX Hash", tx]);
+        }
+        if let Some(ref token) = self.new_token_address {
+            table.add_row(vec!["New Token", token]);
+        }
+        table.add_row(vec!["Calldata", &self.calldata]);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::token::TokenMintResult {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Dry Run", &self.dry_run.to_string()]);
+        table.add_row(vec!["Token", &self.token]);
+        table.add_row(vec!["Recipient", &self.to]);
+        table.add_row(vec![
+            "Amount",
+            &format!("{} ({})", self.amount_display, self.amount_raw),
+        ]);
+        if let Some(ref from) = self.from_address {
+            table.add_row(vec!["From", from]);
+        }
+        if let Some(gas) = self.estimated_gas {
+            table.add_row(vec!["Estimated Gas", &gas.to_string()]);
+        }
+        if let Some(ref tx) = self.tx_hash {
+            table.add_row(vec!["TX Hash", tx]);
+        }
+        table.add_row(vec!["Calldata", &self.calldata]);
         println!("{}", table);
     }
 }

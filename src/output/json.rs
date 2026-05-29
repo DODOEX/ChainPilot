@@ -89,6 +89,18 @@ fn error_code_and_suggestion(err: &ChainError) -> (String, Option<String>) {
             )),
         ),
         ChainError::InsufficientBalance { .. } => ("insufficient_balance".to_string(), None),
+        ChainError::MissingFactoryAddress(chain_id)
+        | ChainError::UnsupportedTokenFactoryChain(chain_id) => (
+            "unsupported_token_factory".to_string(),
+            Some(format!(
+                "Chain {} does not expose an ERC20V3Factory in this CLI build.",
+                chain_id
+            )),
+        ),
+        ChainError::InvalidTokenCreateParams(_) => (
+            "invalid_token_create_params".to_string(),
+            Some("Check --name, --symbol, --supply, and --decimals.".to_string()),
+        ),
         _ => ("unknown_error".to_string(), None),
     }
 }

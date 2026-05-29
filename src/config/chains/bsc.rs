@@ -10,6 +10,7 @@ pub static CONFIG: ChainConfig = ChainConfig {
     ],
     contracts: ChainContracts {
         dodo_approve: "0xa128Ba44B2738A558A1fdC06d6303d52D3Cef8c1",
+        erc20_v3_factory: Some("0x5eD22a48Fee263207f5cAAE1A1f1a27011e7Dc92"),
     },
     native_token: NativeToken {
         symbol: "BNB",

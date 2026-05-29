@@ -6,6 +6,7 @@ pub static CONFIG: ChainConfig = ChainConfig {
     rpc_urls: &["https://evm.confluxrpc.com"],
     contracts: ChainContracts {
         dodo_approve: "0x5BaF16d57620Cb361F622232F3cb4090e35F3da2",
+        erc20_v3_factory: Some("0x585adbb35d0ee28b0d2adc7213284d37bab7ea4b"),
     },
     native_token: NativeToken {
         symbol: "CFX",

@@ -3,11 +3,13 @@ name: chainpilot
 description: >
   Use the ChainPilot CLI to perform DeFi operations on EVM-compatible chains —
   getting swap quotes via the DODO aggregator, simulating and executing swaps,
-  managing ERC-20 approvals, querying token metadata, checking wallet balances,
-  and running risk analysis. Always use this skill when the user mentions
-  chainpilot, wants to swap tokens, check a token's risk score, query wallet
-  balances, approve or revoke a spender, or inspect token contract metadata on
-  any EVM chain (Ethereum, Arbitrum, Base, BNB Chain, Polygon, etc.).
+  managing ERC-20 approvals, querying token metadata, creating tokens through
+  DODO's ERC20V3Factory, minting mintable tokens, checking wallet balances, and
+  running risk analysis. Always use this skill when the user mentions
+  chainpilot, wants to swap tokens, create a token, mint a token, check a
+  token's risk score, query wallet balances, approve or revoke a spender, or
+  inspect token contract metadata on any EVM chain (Ethereum, Arbitrum, Base,
+  BNB Chain, Polygon, etc.).
 ---
 
 # ChainPilot CLI
@@ -310,6 +312,65 @@ chainpilot [--chain-id <N>] token add <TOKEN_ADDRESS>
 Fetch the token metadata on-chain and save it to the local custom token store.
 Use this when a token symbol is missing from the DODO tokenlist but the user
 already knows the contract address.
+
+### `token fee`
+
+```bash
+chainpilot [--chain-id <N>] token fee
+```
+
+Read the ERC20V3Factory create fee for the active chain.
+
+### `token create std`
+
+```bash
+chainpilot [--chain-id <N>] token create std \
+  --name <NAME> --symbol <SYMBOL> --supply <AMOUNT> [--decimals <N>] [--dry-run]
+```
+
+Create a standard ERC-20 through DODO's ERC20V3Factory.
+
+### `token create custom`
+
+```bash
+chainpilot [--chain-id <N>] token create custom \
+  --name <NAME> --symbol <SYMBOL> --supply <AMOUNT> \
+  [--decimals <N>] [--burn-pct <0-50>] [--fee-pct <0-50>] \
+  [--team-account <ADDR>] [--dry-run]
+```
+
+Create a custom ERC-20 with trade burn / fee ratios. Percent inputs support up
+to 2 decimals, for example `0.1` or `1.25`.
+
+### `token create mintable`
+
+```bash
+chainpilot [--chain-id <N>] token create mintable \
+  --name <NAME> --symbol <SYMBOL> --supply <AMOUNT> \
+  [--decimals <N>] [--burn-pct <0-50>] [--fee-pct <0-50>] \
+  [--owner <ADDR>] [--dry-run]
+```
+
+Create a mintable ERC-20. The owner defaults to the active signer or configured
+wallet if not provided.
+
+### `token mint`
+
+```bash
+chainpilot [--chain-id <N>] token mint \
+  --token <TOKEN_ADDRESS> --to <RECIPIENT> --amount <AMOUNT> [--dry-run]
+```
+
+Mint additional supply on a mintable token.
+
+### `token renounce-ownership`
+
+```bash
+chainpilot [--chain-id <N>] token renounce-ownership \
+  --token <TOKEN_ADDRESS> [--dry-run]
+```
+
+Calls `abandonOwnership(address(0))`. This is irreversible on the token.
 
 ---
 

@@ -10,6 +10,7 @@ pub static CONFIG: ChainConfig = ChainConfig {
     ],
     contracts: ChainContracts {
         dodo_approve: "0xCFea63e3DE31De53D68780Dd65675F169439e470",
+        erc20_v3_factory: Some("0x00971e21955F1bb8021a5eF2546beC2Ff896EE42"),
     },
     native_token: NativeToken {
         symbol: "AVAX",

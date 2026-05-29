@@ -11,6 +11,7 @@
 - 执行兑换，支持等待交易上链和状态轮询
 - 管理 ERC-20 授权（approve / revoke）
 - 查询链上代币元数据与钱包余额
+- 通过 DODO ERC20V3Factory 创建 ERC-20、给可增发代币铸币、放弃所有权
 - 对代币、钱包和授权额度进行风险分析
 - 机器可读的 JSON 输出（`--json`），适用于脚本和 Agent 流水线
 
@@ -270,6 +271,39 @@ chainpilot --chain-id 137 token contract USDC
 # 本地保存自定义 token，供后续按 symbol 解析
 chainpilot token add 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48
 chainpilot --chain-id 8453 token add 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+
+# 读取当前链 ERC20V3Factory 的发币手续费
+chainpilot --chain-id 11155111 token fee
+
+# 创建标准 ERC-20
+chainpilot --chain-id 11155111 token create std \
+  --name "ChainPilot Token" \
+  --symbol CPT \
+  --supply 1000000
+
+# 创建带交易燃烧 / 手续费参数的自定义代币
+chainpilot --chain-id 11155111 token create custom \
+  --name "ChainPilot Tax Token" \
+  --symbol CPTX \
+  --supply 1000000 \
+  --burn-pct 0.1 \
+  --fee-pct 1.25
+
+# 创建可增发代币
+chainpilot --chain-id 11155111 token create mintable \
+  --name "ChainPilot Mintable" \
+  --symbol CPM \
+  --supply 1000000
+
+# 给指定地址增发
+chainpilot --chain-id 11155111 token mint \
+  --token 0xYourMintableToken \
+  --to 0xRecipient \
+  --amount 100
+
+# 对支持 abandonOwnership(address(0)) 的代币放弃所有权
+chainpilot --chain-id 11155111 token renounce-ownership \
+  --token 0xYourToken
 ```
 
 ### Wallet（钱包）
