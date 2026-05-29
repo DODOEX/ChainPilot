@@ -1,6 +1,6 @@
 [package]
 name = "chain-pilot"
-version = "0.3.0-rc.1"
+version = "0.3.0"
 description = "A CLI tool for on-chain DeFi operations on EVM-compatible networks"
 homepage = "https://github.com/DODOEX/ChainPilot"
 documentation = "https://github.com/DODOEX/ChainPilot#readme"
