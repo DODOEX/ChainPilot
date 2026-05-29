@@ -507,20 +507,134 @@ impl TableRenderable for crate::models::token::TokenMintResult {
 
 impl TableRenderable for crate::models::wallet::WalletBalance {
     fn render_table(&self) {
-        let mut table = Table::new();
-        table.set_header(vec!["Field", "Value"]);
-        table.add_row(vec!["Address", &self.address]);
-        table.add_row(vec![
-            "ETH Balance",
-            &format!("{} ({})", self.eth_balance_display, self.eth_balance),
+        let mut header = Table::new();
+        header.set_header(vec!["Field", "Value"]);
+        header.add_row(vec!["Wallet", &self.wallet]);
+        header.add_row(vec![
+            "Total Balance (USD)",
+            &self
+                .total_balance_usd
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
         ]);
-        for tb in &self.token_balances {
-            table.add_row(vec![
-                &format!("{} Balance", tb.symbol),
-                &format!("{} ({})", tb.balance_display, tb.balance),
-            ]);
+        println!("{}", header);
+
+        if !self.chain_allocation.is_empty() {
+            let mut chains = Table::new();
+            chains.set_header(vec!["Chain", "Balance (USD)", "Share"]);
+            for c in &self.chain_allocation {
+                chains.add_row(vec![
+                    &c.chain,
+                    &format_usd(c.balance_usd),
+                    &format!("{:.2}%", c.percentage),
+                ]);
+            }
+            println!("Chain allocation:");
+            println!("{}", chains);
         }
-        println!("{}", table);
+
+        if !self.assets.is_empty() {
+            let mut assets = Table::new();
+            assets.set_header(vec![
+                "Chain",
+                "Symbol",
+                "Amount",
+                "Price (USD)",
+                "Value (USD)",
+            ]);
+            for a in &self.assets {
+                assets.add_row(vec![
+                    &a.chain,
+                    &a.symbol,
+                    &format!("{}", a.amount),
+                    &a.price_usd
+                        .map(format_usd)
+                        .unwrap_or_else(|| "N/A".to_string()),
+                    &a.value_usd
+                        .map(format_usd)
+                        .unwrap_or_else(|| "N/A".to_string()),
+                ]);
+            }
+            println!("Assets:");
+            println!("{}", assets);
+        }
+    }
+}
+
+impl TableRenderable for crate::models::wallet::WalletOverview {
+    fn render_table(&self) {
+        let mut header = Table::new();
+        header.set_header(vec!["Field", "Value"]);
+        header.add_row(vec!["Wallet", &self.wallet]);
+        header.add_row(vec![
+            "Total Balance (USD)",
+            &self
+                .total_balance_usd
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        println!("{}", header);
+
+        if !self.chain_allocation.is_empty() {
+            let mut t = Table::new();
+            t.set_header(vec!["Chain", "Balance (USD)", "Share"]);
+            for c in &self.chain_allocation {
+                t.add_row(vec![
+                    &c.chain,
+                    &format_usd(c.balance_usd),
+                    &format!("{:.2}%", c.percentage),
+                ]);
+            }
+            println!("Chain allocation:");
+            println!("{}", t);
+        }
+
+        if !self.token_allocation.is_empty() {
+            let mut t = Table::new();
+            t.set_header(vec!["Symbol", "Name", "Balance (USD)", "Share"]);
+            for a in &self.token_allocation {
+                t.add_row(vec![
+                    &a.symbol,
+                    &a.name,
+                    &format_usd(a.balance_usd),
+                    &format!("{:.2}%", a.percentage),
+                ]);
+            }
+            println!("Token allocation:");
+            println!("{}", t);
+        }
+
+        if !self.top_holdings.is_empty() {
+            let mut t = Table::new();
+            t.set_header(vec!["Symbol", "Chain", "Amount", "Value (USD)"]);
+            for h in &self.top_holdings {
+                t.add_row(vec![
+                    &h.symbol,
+                    &h.chain,
+                    &format!("{}", h.amount),
+                    &format_usd(h.value_usd),
+                ]);
+            }
+            println!("Top holdings:");
+            println!("{}", t);
+        }
+
+        if !self.active_protocols.is_empty() {
+            let mut t = Table::new();
+            t.set_header(vec!["Protocol", "Chain", "Net (USD)", "Site"]);
+            for p in &self.active_protocols {
+                t.add_row(vec![
+                    &p.name,
+                    &p.chain,
+                    &p.net_usd_value
+                        .map(format_usd)
+                        .unwrap_or_else(|| "N/A".to_string()),
+                    p.site_url.as_deref().unwrap_or(""),
+                ]);
+            }
+            println!("Active protocols:");
+            println!("{}", t);
+        }
     }
 }
 

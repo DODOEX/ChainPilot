@@ -71,6 +71,12 @@ pub fn chain_config(chain_id: u64) -> Option<&'static ChainConfig> {
     CHAINS.iter().copied().find(|c| c.chain_id == chain_id)
 }
 
+/// All supported chain IDs in registration order. Used by aggregators that
+/// fan out per-chain requests (e.g. Goldrush balances_v2).
+pub fn all_chain_ids() -> impl Iterator<Item = u64> {
+    CHAINS.iter().map(|c| c.chain_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -14,6 +14,9 @@ const CONFIGURABLE_KEYS: &[(&str, &str, bool)] = &[
     ("dodo_api_key", "DODO_API_KEY", true),
     ("dodo_project_id", "DODO_PROJECT_ID", false),
     ("coingecko_api_key", "COINGECKO_API_KEY", true),
+    ("debank_api_key", "DEBANK_API_KEY", true),
+    ("zerion_api_key", "ZERION_API_KEY", true),
+    ("goldrush_api_key", "GOLDRUSH_API_KEY", true),
 ];
 
 fn find_key(key: &str) -> Option<(&'static str, &'static str, bool)> {

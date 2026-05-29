@@ -60,7 +60,7 @@ pub enum Commands {
     Swap(swap::SwapCmd),
     /// Token information (info, contract)
     Token(token::TokenCmd),
-    /// Wallet data (balance)
+    /// Wallet data (balance, overview)
     Wallet(wallet::WalletCmd),
     /// Risk analysis (token, wallet, approval)
     Risk(risk::RiskCmd),
