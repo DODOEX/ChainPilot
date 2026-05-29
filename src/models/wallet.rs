@@ -80,3 +80,37 @@ pub struct TopHolding {
     pub amount: f64,
     pub value_usd: f64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletPnl {
+    pub wallet: String,
+    pub realized_pnl: Option<f64>,
+    pub unrealized_pnl: Option<f64>,
+    pub total_pnl: Option<f64>,
+    pub roi: Option<f64>,
+    pub win_rate: Option<f64>,
+    pub total_invested: Option<f64>,
+    pub total_fee: Option<f64>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletHistory {
+    pub wallet: String,
+    pub transactions: Vec<WalletTransaction>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletTransaction {
+    pub tx_hash: String,
+    pub time: String,
+    pub action: String,
+    pub status: Option<String>,
+    pub fee_usd: Option<f64>,
+    pub token_in: Option<String>,
+    pub token_out: Option<String>,
+    pub value_usd: Option<f64>,
+    pub amount: Option<f64>,
+    pub success: Option<bool>,
+}

@@ -169,6 +169,102 @@ pub struct ZerionPositionRecord {
     pub protocol_url: Option<String>,
 }
 
+// ── pnl ──────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct PnlResponse {
+    data: Option<PnlData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PnlData {
+    attributes: Option<PnlAttributes>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PnlAttributes {
+    realized_gain: Option<f64>,
+    unrealized_gain: Option<f64>,
+    relative_total_gain_percentage: Option<f64>,
+    total_invested: Option<f64>,
+    total_fee: Option<f64>,
+    #[serde(default)]
+    breakdown: Vec<PnlBreakdownItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PnlBreakdownItem {
+    realized_gain: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ZerionPnlRecord {
+    pub realized_pnl: Option<f64>,
+    pub unrealized_pnl: Option<f64>,
+    pub total_pnl: Option<f64>,
+    pub roi: Option<f64>,
+    pub win_rate: Option<f64>,
+    pub total_invested: Option<f64>,
+    pub total_fee: Option<f64>,
+}
+
+// ── transactions ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct TransactionsResponse {
+    #[serde(default)]
+    data: Vec<TransactionItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransactionItem {
+    attributes: Option<TransactionAttributes>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransactionAttributes {
+    operation_type: Option<String>,
+    hash: Option<String>,
+    mined_at: Option<String>,
+    status: Option<String>,
+    fee: Option<TransactionFee>,
+    #[serde(default)]
+    transfers: Vec<TransactionTransfer>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransactionFee {
+    value: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransactionTransfer {
+    direction: Option<String>,
+    quantity: Option<TransferQuantity>,
+    fungible_info: Option<FungibleInfo>,
+    value: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TransferQuantity {
+    float: Option<f64>,
+    numeric: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ZerionTransactionRecord {
+    pub tx_hash: String,
+    pub time: String,
+    pub action: String,
+    pub status: Option<String>,
+    pub fee_usd: Option<f64>,
+    pub token_in: Option<String>,
+    pub token_out: Option<String>,
+    pub value_usd: Option<f64>,
+    pub amount: Option<f64>,
+    pub success: Option<bool>,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 impl ZerionClient {
@@ -308,6 +404,179 @@ impl ZerionClient {
         })?;
 
         Ok(resp.data.into_iter().filter_map(map_position).collect())
+    }
+
+    pub async fn pnl(&self, address: &str) -> Result<ZerionPnlRecord> {
+        self.require_key()?;
+        let url = format!("{}/wallets/{}/pnl/", self.base_url, address);
+
+        let req = self
+            .client
+            .get(&url)
+            .basic_auth(&self.api_key, Some(""))
+            .header("accept", "application/json")
+            .timeout(Duration::from_secs(15))
+            .query(&[("currency", "usd")]);
+        let body = send_retrying(req, "zerion.pnl")
+            .await?
+            .error_for_status()
+            .map_err(ChainError::Http)?
+            .text()
+            .await
+            .map_err(ChainError::Http)?;
+
+        let resp: PnlResponse = serde_json::from_str(&body).map_err(|e| {
+            ChainError::Config(format!(
+                "Zerion pnl response could not be parsed: {e}. Body snippet: {}",
+                snippet(&body)
+            ))
+        })?;
+
+        let attrs = resp
+            .data
+            .and_then(|d| d.attributes)
+            .ok_or_else(|| ChainError::Config("Zerion pnl response was empty".to_string()))?;
+
+        let realized = attrs.realized_gain;
+        let unrealized = attrs.unrealized_gain;
+        let total_pnl = match (realized, unrealized) {
+            (Some(r), Some(u)) => Some(r + u),
+            (Some(r), None) => Some(r),
+            (None, Some(u)) => Some(u),
+            (None, None) => None,
+        };
+
+        let win_rate = if attrs.breakdown.is_empty() {
+            None
+        } else {
+            let winners = attrs
+                .breakdown
+                .iter()
+                .filter(|b| b.realized_gain.unwrap_or(0.0) > 0.0)
+                .count();
+            Some(winners as f64 / attrs.breakdown.len() as f64 * 100.0)
+        };
+
+        Ok(ZerionPnlRecord {
+            realized_pnl: realized,
+            unrealized_pnl: unrealized,
+            total_pnl,
+            roi: attrs.relative_total_gain_percentage,
+            win_rate,
+            total_invested: attrs.total_invested,
+            total_fee: attrs.total_fee,
+        })
+    }
+
+    pub async fn transactions(
+        &self,
+        address: &str,
+        limit: u32,
+    ) -> Result<Vec<ZerionTransactionRecord>> {
+        self.require_key()?;
+        let url = format!("{}/wallets/{}/transactions/", self.base_url, address);
+
+        let req = self
+            .client
+            .get(&url)
+            .basic_auth(&self.api_key, Some(""))
+            .header("accept", "application/json")
+            .timeout(Duration::from_secs(20))
+            .query(&[
+                ("currency", "usd".to_string()),
+                ("page[size]", limit.to_string()),
+            ]);
+        let body = send_retrying(req, "zerion.transactions")
+            .await?
+            .error_for_status()
+            .map_err(ChainError::Http)?
+            .text()
+            .await
+            .map_err(ChainError::Http)?;
+
+        let resp: TransactionsResponse = serde_json::from_str(&body).map_err(|e| {
+            ChainError::Config(format!(
+                "Zerion transactions response could not be parsed: {e}. Body snippet: {}",
+                snippet(&body)
+            ))
+        })?;
+
+        Ok(resp
+            .data
+            .into_iter()
+            .filter_map(|item| {
+                let attrs = item.attributes?;
+                let tx_hash = attrs.hash?;
+                let time = attrs.mined_at.unwrap_or_default();
+                let action = attrs
+                    .operation_type
+                    .unwrap_or_else(|| "unknown".to_string());
+                let success = attrs.status.as_deref().map(|s| s == "confirmed");
+                let fee_usd = attrs.fee.and_then(|f| f.value);
+
+                // Extract token_in / token_out / value_usd / amount from transfers
+                let mut token_in: Option<String> = None;
+                let mut token_out: Option<String> = None;
+                let mut amount: Option<f64> = None;
+                let mut total_value_in: f64 = 0.0;
+                let mut total_value_out: f64 = 0.0;
+
+                for t in &attrs.transfers {
+                    let symbol = t
+                        .fungible_info
+                        .as_ref()
+                        .and_then(|f| f.symbol.clone())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let val = t.value.unwrap_or(0.0);
+                    let qty = t.quantity.as_ref().and_then(|q| {
+                        q.float.or_else(|| {
+                            q.numeric.as_deref().and_then(|s| s.parse::<f64>().ok())
+                        })
+                    });
+                    match t.direction.as_deref() {
+                        Some("in") => {
+                            if token_in.is_none() {
+                                token_in = Some(symbol);
+                                amount = qty;
+                            }
+                            total_value_in += val;
+                        }
+                        Some("out") => {
+                            if token_out.is_none() {
+                                token_out = Some(symbol);
+                                // Take amount from out direction when no in transfer
+                                if amount.is_none() {
+                                    amount = qty;
+                                }
+                            }
+                            total_value_out += val;
+                        }
+                        _ => {}
+                    }
+                }
+
+                let value_usd = if total_value_in > 0.0 {
+                    Some(total_value_in)
+                } else if total_value_out > 0.0 {
+                    Some(total_value_out)
+                } else {
+                    None
+                };
+
+                Some(ZerionTransactionRecord {
+                    tx_hash,
+                    time,
+                    action,
+                    status: attrs.status,
+                    fee_usd,
+                    token_in,
+                    token_out,
+                    value_usd,
+                    amount,
+                    success,
+                })
+            })
+            .collect())
     }
 
     fn require_key(&self) -> Result<()> {

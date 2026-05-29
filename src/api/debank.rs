@@ -98,6 +98,56 @@ pub struct DebankTotalBalance {
     pub chains: Vec<DebankChainSummary>,
 }
 
+// ── transaction history ──────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct HistoryListResp {
+    #[serde(default)]
+    history_list: Vec<HistoryItem>,
+    #[serde(default)]
+    token_dict: std::collections::HashMap<String, HistoryTokenInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoryTokenInfo {
+    symbol: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoryItem {
+    id: Option<String>,
+    time_at: Option<u64>,
+    cate_id: Option<String>,
+    tx: Option<HistoryTx>,
+    #[serde(default)]
+    sends: Vec<HistoryTransfer>,
+    #[serde(default)]
+    receives: Vec<HistoryTransfer>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoryTx {
+    status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoryTransfer {
+    amount: Option<f64>,
+    token_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DebankHistoryRecord {
+    pub tx_hash: String,
+    pub time: String,
+    pub action: String,
+    pub token_in: Option<String>,
+    pub token_out: Option<String>,
+    pub value_usd: Option<f64>,
+    pub amount: Option<f64>,
+    pub success: Option<bool>,
+}
+
 impl DebankClient {
     pub fn new(client: Client, base_url: &str, api_key: &str) -> Self {
         Self {
@@ -242,6 +292,82 @@ impl DebankClient {
             .collect())
     }
 
+    pub async fn all_history_list(
+        &self,
+        address: &str,
+        page_count: u32,
+    ) -> Result<Vec<DebankHistoryRecord>> {
+        self.require_key()?;
+        let url = format!("{}/user/all_history_list", self.base_url);
+        let req = self
+            .client
+            .get(&url)
+            .header("AccessKey", &self.api_key)
+            .header("accept", "application/json")
+            .timeout(Duration::from_secs(15))
+            .query(&[
+                ("id", address.to_string()),
+                ("page_count", page_count.to_string()),
+            ]);
+        let resp: HistoryListResp = send_retrying(req, "debank.all_history_list")
+            .await?
+            .error_for_status()
+            .map_err(map_http_err)?
+            .json()
+            .await
+            .map_err(map_http_err)?;
+
+        let token_dict = resp.token_dict;
+
+        Ok(resp
+            .history_list
+            .into_iter()
+            .filter_map(|h| {
+                let tx_hash = h.id?;
+                let time = h
+                    .time_at
+                    .map(|ts| {
+                        chrono::DateTime::from_timestamp(ts as i64, 0)
+                            .map(|dt| dt.to_rfc3339())
+                            .unwrap_or_else(|| ts.to_string())
+                    })
+                    .unwrap_or_default();
+                let action = debank_cate_to_action(h.cate_id.as_deref());
+
+                let token_out = h.receives.first().and_then(|t| {
+                    t.token_id.as_ref().and_then(|id| {
+                        token_dict
+                            .get(id)
+                            .and_then(|info| info.symbol.clone())
+                    })
+                });
+                let token_in = h.sends.first().and_then(|t| {
+                    t.token_id.as_ref().and_then(|id| {
+                        token_dict
+                            .get(id)
+                            .and_then(|info| info.symbol.clone())
+                    })
+                });
+                let amount = h.sends.first().and_then(|t| t.amount);
+
+                let success = h.tx.as_ref().and_then(|tx| {
+                    tx.status.as_deref().map(|s| s == "ok")
+                });
+
+                Some(DebankHistoryRecord {
+                    tx_hash,
+                    time,
+                    action,
+                    token_in,
+                    token_out,
+                    value_usd: None,
+                    amount,
+                    success,
+                })
+            })
+            .collect())
+    }
+
     fn require_key(&self) -> Result<()> {
         if self.api_key.is_empty() {
             Err(ChainError::Config(
@@ -256,6 +382,21 @@ impl DebankClient {
 
 fn map_http_err(e: reqwest::Error) -> ChainError {
     ChainError::Http(e)
+}
+
+fn debank_cate_to_action(cate_id: Option<&str>) -> String {
+    match cate_id {
+        Some("send") => "send".to_string(),
+        Some("receive") => "receive".to_string(),
+        Some("approve") => "approve".to_string(),
+        Some("swap") => "swap".to_string(),
+        Some("bridge") => "bridge".to_string(),
+        Some("deposit") => "deposit".to_string(),
+        Some("withdraw") => "withdraw".to_string(),
+        Some("claim") => "claim".to_string(),
+        Some(other) => other.to_string(),
+        None => "unknown".to_string(),
+    }
 }
 
 /// Map a Debank chain slug (e.g. "eth", "bsc", "matic") to an EVM chain ID.

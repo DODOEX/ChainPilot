@@ -5,12 +5,13 @@ use crate::api::{
     debank_chain_to_id, ApiClients, GoldrushChainBalance, ZerionPortfolio, ZerionPositionRecord,
 };
 use crate::chain::{get_eth_balance, OnChainClient};
-use crate::cli::wallet::{BalanceArgs, OverviewArgs, WalletAction, WalletCmd};
+use crate::cli::wallet::{BalanceArgs, HistoryArgs, OverviewArgs, PnlArgs, WalletAction, WalletCmd};
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
 use crate::models::wallet::{
     ActiveProtocol, ChainAllocation, TokenAllocation, TopHolding, WalletAsset, WalletBalance,
-    WalletBalanceSources, WalletOverview, WalletOverviewSources,
+    WalletBalanceSources, WalletHistory, WalletOverview, WalletOverviewSources, WalletPnl,
+    WalletTransaction,
 };
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -34,6 +35,8 @@ pub async fn handle(
     match cmd.action {
         WalletAction::Balance(args) => balance(args, api, config, output_mode).await,
         WalletAction::Overview(args) => overview(args, api, config, output_mode).await,
+        WalletAction::Pnl(args) => pnl(args, api, config, output_mode).await,
+        WalletAction::History(args) => history(args, api, config, output_mode).await,
     }
 }
 
@@ -928,6 +931,150 @@ fn goldrush_asset_to_wallet_asset(item: &crate::api::GoldrushAssetRecord) -> Wal
         price_usd: item.price_usd,
         value_usd: item.value_usd,
     }
+}
+
+async fn pnl(
+    args: PnlArgs,
+    api: &ApiClients,
+    config: &AppConfig,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    let chain_id = config.chain_id;
+    let ctx = OutputContext::new(chain_id, false);
+
+    if args.address.parse::<Address>().is_err() {
+        return Ok(crate::output::print_output::<WalletPnl>(
+            Err(ChainError::InvalidAddress(args.address.clone())),
+            "wallet.pnl",
+            output_mode,
+            ctx,
+        ));
+    }
+
+    let result = build_pnl(&args, api).await;
+    Ok(crate::output::print_output::<WalletPnl>(
+        result,
+        "wallet.pnl",
+        output_mode,
+        ctx,
+    ))
+}
+
+async fn build_pnl(args: &PnlArgs, api: &ApiClients) -> Result<WalletPnl> {
+    if !api.zerion.is_configured() {
+        return Err(ChainError::Config(
+            "PnL requires ZERION_API_KEY. Run: chainpilot config set zerion_api_key <key>"
+                .to_string(),
+        ));
+    }
+
+    let record = api.zerion.pnl(&args.address).await?;
+    Ok(WalletPnl {
+        wallet: args.address.clone(),
+        realized_pnl: record.realized_pnl,
+        unrealized_pnl: record.unrealized_pnl,
+        total_pnl: record.total_pnl,
+        roi: record.roi,
+        win_rate: record.win_rate,
+        total_invested: record.total_invested,
+        total_fee: record.total_fee,
+        source: "zerion".to_string(),
+    })
+}
+
+async fn history(
+    args: HistoryArgs,
+    api: &ApiClients,
+    config: &AppConfig,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    let chain_id = config.chain_id;
+    let ctx = OutputContext::new(chain_id, false);
+
+    if args.address.parse::<Address>().is_err() {
+        return Ok(crate::output::print_output::<WalletHistory>(
+            Err(ChainError::InvalidAddress(args.address.clone())),
+            "wallet.history",
+            output_mode,
+            ctx,
+        ));
+    }
+
+    let result = build_history(&args, api).await;
+    Ok(crate::output::print_output::<WalletHistory>(
+        result,
+        "wallet.history",
+        output_mode,
+        ctx,
+    ))
+}
+
+async fn build_history(args: &HistoryArgs, api: &ApiClients) -> Result<WalletHistory> {
+    let limit = args.limit.clamp(1, 100);
+
+    if api.zerion.is_configured() {
+        match api.zerion.transactions(&args.address, limit).await {
+            Ok(txs) => {
+                return Ok(WalletHistory {
+                    wallet: args.address.clone(),
+                    transactions: txs
+                        .into_iter()
+                        .map(|t| WalletTransaction {
+                            tx_hash: t.tx_hash,
+                            time: t.time,
+                            action: t.action,
+                            status: t.status,
+                            fee_usd: t.fee_usd,
+                            token_in: t.token_in,
+                            token_out: t.token_out,
+                            value_usd: t.value_usd,
+                            amount: t.amount,
+                            success: t.success,
+                        })
+                        .collect(),
+                    source: "zerion".to_string(),
+                });
+            }
+            Err(e) => {
+                tracing::warn!("Zerion transactions failed: {e}. Falling back to Debank.");
+            }
+        }
+    }
+
+    if api.debank.is_configured() {
+        match api.debank.all_history_list(&args.address, limit).await {
+            Ok(txs) => {
+                return Ok(WalletHistory {
+                    wallet: args.address.clone(),
+                    transactions: txs
+                        .into_iter()
+                        .map(|t| WalletTransaction {
+                            tx_hash: t.tx_hash,
+                            time: t.time,
+                            action: t.action,
+                            status: None,
+                            fee_usd: None,
+                            token_in: t.token_in,
+                            token_out: t.token_out,
+                            value_usd: t.value_usd,
+                            amount: t.amount,
+                            success: t.success,
+                        })
+                        .collect(),
+                    source: "debank".to_string(),
+                });
+            }
+            Err(e) => {
+                tracing::warn!("Debank history failed: {e}");
+            }
+        }
+    }
+
+    Err(ChainError::Config(
+        "Transaction history requires ZERION_API_KEY or DEBANK_API_KEY. \
+         Run: chainpilot config set zerion_api_key <key>"
+            .to_string(),
+    ))
 }
 
 #[cfg(test)]

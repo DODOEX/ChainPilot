@@ -638,6 +638,118 @@ impl TableRenderable for crate::models::wallet::WalletOverview {
     }
 }
 
+impl TableRenderable for crate::models::wallet::WalletPnl {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Metric", "Value"]);
+        table.add_row(vec!["Wallet", &self.wallet]);
+        table.add_row(vec![
+            "Realized PnL",
+            &self
+                .realized_pnl
+                .map(format_pnl)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "Unrealized PnL",
+            &self
+                .unrealized_pnl
+                .map(format_pnl)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "Total PnL",
+            &self
+                .total_pnl
+                .map(format_pnl)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "ROI",
+            &self
+                .roi
+                .map(|v| format!("{:+.2}%", v))
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "Win Rate",
+            &self
+                .win_rate
+                .map(|v| format!("{:.1}%", v))
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "Total Invested",
+            &self
+                .total_invested
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "Total Fees",
+            &self
+                .total_fee
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec!["Source", &self.source]);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::wallet::WalletHistory {
+    fn render_table(&self) {
+        if self.transactions.is_empty() {
+            println!("No transactions found for {}", self.wallet);
+            return;
+        }
+        let mut table = Table::new();
+        table.set_header(vec![
+            "Time",
+            "Action",
+            "In",
+            "Amount",
+            "Out",
+            "Value (USD)",
+            "Success",
+            "TX Hash",
+        ]);
+        for tx in &self.transactions {
+            let short_hash = if tx.tx_hash.len() > 18 {
+                format!("{}…", &tx.tx_hash[..18])
+            } else {
+                tx.tx_hash.clone()
+            };
+            table.add_row(vec![
+                &tx.time,
+                &tx.action,
+                tx.token_in.as_deref().unwrap_or("-"),
+                &tx.amount
+                    .map(|v| format!("{:.6}", v))
+                    .unwrap_or_else(|| "-".to_string()),
+                tx.token_out.as_deref().unwrap_or("-"),
+                &tx.value_usd
+                    .map(format_usd)
+                    .unwrap_or_else(|| "-".to_string()),
+                &tx.success
+                    .map(|s| if s { "Yes" } else { "No" }.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                &short_hash,
+            ]);
+        }
+        println!("Wallet: {} (source: {})", self.wallet, self.source);
+        println!("{}", table);
+    }
+}
+
+fn format_pnl(value: f64) -> String {
+    if value >= 0.0 {
+        format!("+{:.2}", value)
+    } else {
+        format!("{:.2}", value)
+    }
+}
+
 impl TableRenderable for crate::models::risk::RiskReport {
     fn render_table(&self) {
         let mut table = Table::new();

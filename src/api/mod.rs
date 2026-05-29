@@ -8,9 +8,7 @@ pub use debank::{debank_chain_to_id, DebankAssetRecord, DebankClient};
 pub use dodo::DodoClient;
 pub use goldrush::{GoldrushAssetRecord, GoldrushChainBalance, GoldrushClient};
 pub use token_metadata::TokenMetadataClient;
-pub use zerion::{
-    ZerionChainBalance, ZerionClient, ZerionPortfolio, ZerionPositionRecord,
-};
+pub use zerion::{ZerionChainBalance, ZerionClient, ZerionPortfolio, ZerionPositionRecord};
 
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
