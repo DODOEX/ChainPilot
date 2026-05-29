@@ -18,6 +18,39 @@ use crate::cli::Cli;
 use crate::config::AppConfig;
 use crate::output::OutputMode;
 
+/// Load the persistent config file (`config.env` in the data directory).
+/// Existing environment variables keep precedence over persisted values.
+fn load_config_env() {
+    let config_path = default_config_env_path();
+    load_config_env_from_path(&config_path);
+}
+
+fn default_config_env_path() -> std::path::PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("chain")
+        .join("config.env")
+}
+
+fn load_config_env_from_path(config_path: &std::path::Path) {
+    let content = match std::fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            let key = key.trim();
+            if std::env::var_os(key).is_none() {
+                std::env::set_var(key, value.trim());
+            }
+        }
+    }
+}
+
 fn apply_cli_overrides(config: &mut AppConfig, cli: &Cli) {
     // CLI args take highest precedence (above runtime env vars and compile-time defaults).
     if let Some(rpc_url) = cli.rpc_url.clone() {
@@ -57,6 +90,7 @@ fn apply_cli_overrides(config: &mut AppConfig, cli: &Cli) {
 #[tokio::main]
 async fn main() -> Result<ExitCode> {
     dotenvy::dotenv().ok();
+    load_config_env();
 
     if std::env::var("RUST_LOG").is_ok() {
         tracing_subscriber::fmt()
@@ -203,6 +237,26 @@ mod tests {
                     Some("/tmp/test-keystore.json")
                 );
                 assert!(config.private_key.is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn load_config_env_does_not_override_existing_environment() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.env");
+        std::fs::write(&path, "DODO_API_KEY=persisted\nDODO_PROJECT_ID=from-file\n").unwrap();
+
+        with_env(
+            &[
+                ("DODO_API_KEY", Some("from-env")),
+                ("DODO_PROJECT_ID", None),
+            ],
+            || {
+                load_config_env_from_path(&path);
+
+                assert_eq!(std::env::var("DODO_API_KEY").unwrap(), "from-env");
+                assert_eq!(std::env::var("DODO_PROJECT_ID").unwrap(), "from-file");
             },
         );
     }

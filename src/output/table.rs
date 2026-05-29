@@ -209,14 +209,207 @@ impl TableRenderable for crate::models::token::TokenInfo {
         let mut table = Table::new();
         table.set_header(vec!["Field", "Value"]);
         table.add_row(vec!["Address", &self.address]);
+        table.add_row(vec!["Chain ID", &self.chain_id.to_string()]);
+        if let Some(ref chain) = self.chain {
+            table.add_row(vec!["Chain", chain]);
+        }
         table.add_row(vec!["Symbol", &self.symbol]);
         table.add_row(vec!["Name", &self.name]);
         table.add_row(vec!["Decimals", &self.decimals.to_string()]);
+        if let Some(ref website) = self.website {
+            table.add_row(vec!["Website", website]);
+        }
+        let social_links = format_social_links(&self.social_links);
+        if !social_links.is_empty() {
+            table.add_row(vec!["Social", &social_links]);
+        }
+        if let Some(price) = self.price {
+            table.add_row(vec!["Price (USD)", &format_usd(price)]);
+        }
+        if let Some(market_cap) = self.market_cap {
+            table.add_row(vec!["Market Cap (USD)", &format_usd(market_cap)]);
+        }
+        if let Some(fdv) = self.fdv {
+            table.add_row(vec!["FDV (USD)", &format_usd(fdv)]);
+        }
+        if let Some(liquidity) = self.top_liquidity {
+            table.add_row(vec!["Top Liquidity (USD)", &format_usd(liquidity)]);
+        }
+        if let Some(volume) = self.volume_24h {
+            table.add_row(vec!["Volume 24h (USD)", &format_usd(volume)]);
+        }
+        if let Some(change) = self.price_change_24h {
+            table.add_row(vec!["Price Change 24h", &format!("{}%", change)]);
+        }
+        if let Some(ref risk_level) = self.risk_level {
+            table.add_row(vec!["Risk Level", risk_level]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::token::TokenPrice {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value", "Source"]);
+        table.add_row(vec!["Address", &self.address, ""]);
+        table.add_row(vec!["Symbol", &self.symbol, ""]);
+        table.add_row(vec!["Chain ID", &self.chain_id.to_string(), ""]);
+        add_price_row(
+            &mut table,
+            "Price (USD)",
+            self.price.map(format_usd),
+            self.sources.price.as_deref(),
+        );
+        add_price_row(
+            &mut table,
+            "Change 1h",
+            self.price_change_1h.map(format_pct),
+            self.sources.price_change_1h.as_deref(),
+        );
+        add_price_row(
+            &mut table,
+            "Change 24h",
+            self.price_change_24h.map(format_pct),
+            self.sources.price_change_24h.as_deref(),
+        );
+        add_price_row(
+            &mut table,
+            "Change 7d",
+            self.price_change_7d.map(format_pct),
+            self.sources.price_change_7d.as_deref(),
+        );
+        add_price_row(
+            &mut table,
+            "High 24h (USD)",
+            self.high_24h.map(format_usd),
+            self.sources.high_24h.as_deref(),
+        );
+        add_price_row(
+            &mut table,
+            "Low 24h (USD)",
+            self.low_24h.map(format_usd),
+            self.sources.low_24h.as_deref(),
+        );
+        println!("{}", table);
+    }
+}
+
+fn add_price_row(table: &mut Table, label: &str, value: Option<String>, source: Option<&str>) {
+    let value = value.unwrap_or_else(|| "N/A".to_string());
+    table.add_row(vec![label, &value, source.unwrap_or("")]);
+}
+
+impl TableRenderable for crate::models::token::TokenLiquidity {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Address", &self.address]);
+        table.add_row(vec!["Symbol", &self.symbol]);
+        table.add_row(vec!["Chain ID", &self.chain_id.to_string()]);
         table.add_row(vec![
-            "Total Supply",
-            &format!("{} ({})", self.total_supply_display, self.total_supply),
+            "Top Liquidity (USD)",
+            &self
+                .top_liquidity
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
         ]);
-        table.add_row(vec!["Source", &self.source]);
+        table.add_row(vec!["Pair Count", &self.pair_count.to_string()]);
+        if let Some(ref top) = self.top_pair {
+            table.add_row(vec!["Top Pair Address", &top.pair_address]);
+            table.add_row(vec!["Top Pair DEX", &top.dex]);
+            table.add_row(vec![
+                "Top Pair Liquidity (USD)",
+                &top.liquidity.map(format_usd).unwrap_or_else(|| "N/A".to_string()),
+            ]);
+            table.add_row(vec![
+                "Top Pair Volume 24h (USD)",
+                &top.volume_24h.map(format_usd).unwrap_or_else(|| "N/A".to_string()),
+            ]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::token::TokenRisk {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value", "Source"]);
+        table.add_row(vec!["Address", &self.address, ""]);
+        table.add_row(vec!["Symbol", &self.symbol, ""]);
+        table.add_row(vec!["Chain ID", &self.chain_id.to_string(), ""]);
+        add_risk_row(&mut table, "Risk Level", self.risk_level.as_deref(), self.sources.risk_level.as_deref());
+        add_risk_row_score(&mut table, "Risk Score", self.risk_score, self.sources.risk_score.as_deref());
+        add_risk_row_bool(&mut table, "Honeypot", self.honeypot, self.sources.honeypot.as_deref());
+        add_risk_row_bool(&mut table, "Blacklist", self.blacklist, self.sources.blacklist.as_deref());
+        add_risk_row_bool(&mut table, "Transfer Restricted", self.transfer_restricted, self.sources.transfer_restricted.as_deref());
+        add_risk_row_bool(&mut table, "Mintable", self.mintable, self.sources.mintable.as_deref());
+        add_risk_row_bool(&mut table, "Owner Privileged", self.owner_privileged, self.sources.owner_privileged.as_deref());
+        add_risk_row_pct(&mut table, "Buy Tax", self.tax_buy, self.sources.tax_buy.as_deref());
+        add_risk_row_pct(&mut table, "Sell Tax", self.tax_sell, self.sources.tax_sell.as_deref());
+        println!("{}", table);
+    }
+}
+
+fn add_risk_row(table: &mut Table, label: &str, value: Option<&str>, source: Option<&str>) {
+    let value = value.unwrap_or("N/A");
+    table.add_row(vec![label, value, source.unwrap_or("")]);
+}
+
+fn add_risk_row_bool(table: &mut Table, label: &str, value: Option<bool>, source: Option<&str>) {
+    let value = match value {
+        Some(true) => "Yes",
+        Some(false) => "No",
+        None => "N/A",
+    };
+    table.add_row(vec![label, value, source.unwrap_or("")]);
+}
+
+fn add_risk_row_score(table: &mut Table, label: &str, value: Option<f64>, source: Option<&str>) {
+    let value = match value {
+        Some(v) => format!("{}", v),
+        None => "N/A".to_string(),
+    };
+    table.add_row(vec![label, &value, source.unwrap_or("")]);
+}
+
+fn add_risk_row_pct(table: &mut Table, label: &str, value: Option<f64>, source: Option<&str>) {
+    let value = match value {
+        Some(v) => format_pct(v),
+        None => "N/A".to_string(),
+    };
+    table.add_row(vec![label, &value, source.unwrap_or("")]);
+}
+
+fn format_pct(value: f64) -> String {
+    format!("{:.2}%", value)
+}
+
+impl TableRenderable for crate::models::token::TokenSearchResult {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec![
+            "Source",
+            "Symbol",
+            "Name",
+            "Address",
+            "Chain",
+            "Top Liquidity",
+        ]);
+        for candidate in &self.candidates {
+            table.add_row(vec![
+                candidate.source.as_str(),
+                candidate.symbol.as_str(),
+                candidate.name.as_deref().unwrap_or(""),
+                candidate.address.as_deref().unwrap_or(""),
+                candidate.chain.as_deref().unwrap_or(""),
+                &candidate
+                    .top_liquidity
+                    .map(format_usd)
+                    .unwrap_or_else(String::new),
+            ]);
+        }
+        println!("Token not found in DODO tokenlist. Candidate matches:");
         println!("{}", table);
     }
 }
@@ -360,6 +553,54 @@ impl TableRenderable for crate::models::risk::ApprovalRisk {
     }
 }
 
+impl TableRenderable for crate::models::config::ConfigEntry {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Key", &self.key]);
+        let display_value = self
+            .value
+            .as_deref()
+            .unwrap_or("(not set)");
+        table.add_row(vec!["Value", display_value]);
+        if self.masked {
+            table.add_row(vec!["Note", "Sensitive value, partially masked"]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for Vec<crate::models::config::ConfigEntry> {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Key", "Value", "Sensitive"]);
+        for entry in self {
+            let display_value = entry
+                .value
+                .as_deref()
+                .unwrap_or("(not set)");
+            let sensitive = if entry.masked { "Yes" } else { "" };
+            table.add_row(vec![
+                entry.key.as_str(),
+                display_value,
+                sensitive,
+            ]);
+        }
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::config::ConfigStatus {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Key", &self.key]);
+        table.add_row(vec!["Action", &self.action]);
+        table.add_row(vec!["Status", &self.message]);
+        println!("{}", table);
+    }
+}
+
 impl TableRenderable for Vec<crate::models::swap::SwapHistoryRecord> {
     fn render_table(&self) {
         let mut table = Table::new();
@@ -393,6 +634,28 @@ fn format_native_value(raw_wei: &str) -> String {
         Some(display) => format!("{} ETH ({} wei)", display, raw_wei),
         None => raw_wei.to_string(),
     }
+}
+
+fn format_usd(value: f64) -> String {
+    if value.abs() >= 1.0 {
+        format!("{:.2}", value)
+    } else {
+        format!("{:.8}", value).trim_end_matches('0').to_string()
+    }
+}
+
+fn format_social_links(links: &crate::models::token::TokenSocialLinks) -> String {
+    [
+        ("X", links.x.as_deref()),
+        ("Telegram", links.telegram.as_deref()),
+        ("Discord", links.discord.as_deref()),
+        ("GitHub", links.github.as_deref()),
+        ("Docs", links.docs.as_deref()),
+    ]
+    .into_iter()
+    .filter_map(|(label, value)| value.map(|value| format!("{}: {}", label, value)))
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 fn raw_to_decimal_string(raw: &str, decimals: u8) -> Option<String> {

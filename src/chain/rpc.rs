@@ -289,6 +289,8 @@ mod tests {
     }
 
     fn base_config() -> AppConfig {
+        let (coingecko_api_url, coingecko_api_key, dexscreener_api_url) =
+            crate::config::test_metadata_config_fields();
         AppConfig {
             rpc_url: "https://ethereum-rpc.publicnode.com".to_string(),
             rpc_url_overridden: false,
@@ -301,6 +303,9 @@ mod tests {
             dodo_api_url: "https://api.dodoex.io".to_string(),
             dodo_api_key: String::new(),
             dodo_project_id: String::new(),
+            coingecko_api_url,
+            coingecko_api_key,
+            dexscreener_api_url,
             data_dir: std::env::temp_dir(),
         }
     }

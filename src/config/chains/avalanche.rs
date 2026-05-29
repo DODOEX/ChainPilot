@@ -18,5 +18,6 @@ pub static CONFIG: ChainConfig = ChainConfig {
         decimals: 18,
         wrapped_symbol: "WAVAX",
         wrapped_address: "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7",
+        coingecko_id: "avalanche-2",
     },
 };

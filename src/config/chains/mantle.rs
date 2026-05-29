@@ -14,5 +14,6 @@ pub static CONFIG: ChainConfig = ChainConfig {
         decimals: 18,
         wrapped_symbol: "WMNT",
         wrapped_address: "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8",
+        coingecko_id: "mantle",
     },
 };

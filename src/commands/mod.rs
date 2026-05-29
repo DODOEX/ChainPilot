@@ -7,6 +7,7 @@ use crate::error::Result;
 use crate::output::OutputMode;
 use crate::store::QuoteStore;
 
+pub mod config;
 pub mod risk;
 pub mod swap;
 pub mod token;
@@ -30,6 +31,7 @@ pub async fn dispatch(
             wallet::handle(cmd, &config, &store, &api_clients, output_mode).await
         }
         Commands::Risk(cmd) => risk::handle(cmd, &config, &store, &api_clients, output_mode).await,
+        Commands::Config(cmd) => config::handle(cmd, &config, output_mode).await,
     }
 }
 

@@ -26,6 +26,7 @@ pub struct NativeToken {
     pub decimals: u8,
     pub wrapped_symbol: &'static str,
     pub wrapped_address: &'static str,
+    pub coingecko_id: &'static str,
 }
 
 pub struct ChainContracts {

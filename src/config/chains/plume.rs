@@ -14,5 +14,6 @@ pub static CONFIG: ChainConfig = ChainConfig {
         decimals: 18,
         wrapped_symbol: "WPLUME",
         wrapped_address: "0xEa237441c92CAe6FC17Caaf9a7acB3f953be4bd1",
+        coingecko_id: "plume-network",
     },
 };
