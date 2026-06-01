@@ -17,6 +17,10 @@ pub enum WalletAction {
     Pnl(PnlArgs),
     /// Wallet transaction history
     History(HistoryArgs),
+    /// Wallet labels and behavioral tags
+    Labels(LabelsArgs),
+    /// DeFi positions across protocols (deposits, LPs, staking, borrows)
+    Defi(DefiArgs),
 }
 
 #[derive(Args)]
@@ -53,4 +57,20 @@ pub struct HistoryArgs {
     /// Max number of transactions to return (default 20, max 100)
     #[arg(long, default_value_t = 20)]
     pub limit: u32,
+}
+
+#[derive(Args)]
+pub struct LabelsArgs {
+    /// Wallet address
+    pub address: String,
+}
+
+#[derive(Args)]
+pub struct DefiArgs {
+    /// Wallet address
+    pub address: String,
+
+    /// Hide positions worth less than this many USD (default: 1.0)
+    #[arg(long, default_value_t = 1.0)]
+    pub min_usd: f64,
 }

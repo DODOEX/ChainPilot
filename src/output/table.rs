@@ -742,6 +742,98 @@ impl TableRenderable for crate::models::wallet::WalletHistory {
     }
 }
 
+impl TableRenderable for crate::models::wallet::WalletLabels {
+    fn render_table(&self) {
+        println!("Wallet: {} (source: {})", self.wallet, self.source);
+
+        if self.labels.is_empty() {
+            println!("No labels found.");
+            return;
+        }
+
+        println!("Labels: {}", self.labels.join(", "));
+
+        if !self.label_scores.is_empty() {
+            let mut table = Table::new();
+            table.set_header(vec!["Label", "Score", "Reason"]);
+            for ls in &self.label_scores {
+                table.add_row(vec![
+                    &ls.label,
+                    &ls.score
+                        .map(|s| format!("{:.2}", s))
+                        .unwrap_or_else(|| "-".to_string()),
+                    ls.reason.as_deref().unwrap_or("-"),
+                ]);
+            }
+            println!("{}", table);
+        }
+    }
+}
+
+impl TableRenderable for crate::models::wallet::WalletDefi {
+    fn render_table(&self) {
+        let mut header = Table::new();
+        header.set_header(vec!["Field", "Value"]);
+        header.add_row(vec!["Wallet", &self.wallet]);
+        header.add_row(vec![
+            "Total DeFi Value (USD)",
+            &self
+                .total_value_usd
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        header.add_row(vec![
+            "Positions",
+            &self.positions.len().to_string(),
+        ]);
+        header.add_row(vec!["Source", &self.source]);
+        println!("{}", header);
+
+        if self.positions.is_empty() {
+            println!("No DeFi positions found.");
+            return;
+        }
+
+        let mut table = Table::new();
+        table.set_header(vec![
+            "Protocol",
+            "Position",
+            "Chain",
+            "Type",
+            "Value (USD)",
+            "Tokens",
+        ]);
+        for p in &self.positions {
+            let token_str = if p.tokens.is_empty() {
+                "-".to_string()
+            } else {
+                p.tokens
+                    .iter()
+                    .map(|t| {
+                        if let Some(amt) = t.amount {
+                            format!("{} {:.4}", t.symbol, amt)
+                        } else {
+                            t.symbol.clone()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            table.add_row(vec![
+                &p.protocol,
+                &p.position_name,
+                &p.chain,
+                &p.position_type,
+                &p.value_usd
+                    .map(format_usd)
+                    .unwrap_or_else(|| "-".to_string()),
+                &token_str,
+            ]);
+        }
+        println!("{}", table);
+    }
+}
+
 fn format_pnl(value: f64) -> String {
     if value >= 0.0 {
         format!("+{:.2}", value)

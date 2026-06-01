@@ -114,3 +114,43 @@ pub struct WalletTransaction {
     pub amount: Option<f64>,
     pub success: Option<bool>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletLabels {
+    pub wallet: String,
+    pub labels: Vec<String>,
+    pub label_scores: Vec<LabelScore>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabelScore {
+    pub label: String,
+    pub score: Option<f64>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WalletDefi {
+    pub wallet: String,
+    pub total_value_usd: Option<f64>,
+    pub positions: Vec<DefiPosition>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefiPosition {
+    pub protocol: String,
+    pub position_name: String,
+    pub chain: String,
+    pub value_usd: Option<f64>,
+    pub tokens: Vec<DefiPositionToken>,
+    pub position_type: String,
+    pub site_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefiPositionToken {
+    pub symbol: String,
+    pub amount: Option<f64>,
+}

@@ -265,6 +265,15 @@ pub struct ZerionTransactionRecord {
     pub success: Option<bool>,
 }
 
+// ── wallet labels ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct ZerionLabelRecord {
+    pub label: String,
+    pub score: Option<f64>,
+    pub reason: Option<String>,
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 impl ZerionClient {
@@ -466,6 +475,215 @@ impl ZerionClient {
             total_invested: attrs.total_invested,
             total_fee: attrs.total_fee,
         })
+    }
+
+    /// Derive behavioral labels from wallet positions and portfolio data.
+    /// This analyzes position types, protocols, and portfolio characteristics
+    /// to generate wallet behavioral tags.
+    pub async fn wallet_labels(&self, address: &str) -> Result<Vec<ZerionLabelRecord>> {
+        let (portfolio, positions) = tokio::join!(
+            self.portfolio(address),
+            self.positions(address, false, None),
+        );
+        let portfolio = portfolio?;
+        let positions = positions?;
+
+        let mut labels: Vec<ZerionLabelRecord> = Vec::new();
+        let total_usd = portfolio.total_usd.unwrap_or(0.0);
+
+        // ── Value tier labels ──────────────────────────────────────────────
+        if total_usd >= 1_000_000.0 {
+            labels.push(ZerionLabelRecord {
+                label: "whale".to_string(),
+                score: Some(1.0),
+                reason: Some(format!("Portfolio ${:.0} > $1M", total_usd)),
+            });
+        } else if total_usd >= 100_000.0 {
+            labels.push(ZerionLabelRecord {
+                label: "dolphin".to_string(),
+                score: Some(0.9),
+                reason: Some(format!("Portfolio ${:.0} in $100K-$1M range", total_usd)),
+            });
+        } else if total_usd >= 10_000.0 {
+            labels.push(ZerionLabelRecord {
+                label: "fish".to_string(),
+                score: Some(0.8),
+                reason: Some(format!("Portfolio ${:.0} in $10K-$100K range", total_usd)),
+            });
+        } else if total_usd > 0.0 {
+            labels.push(ZerionLabelRecord {
+                label: "shrimp".to_string(),
+                score: Some(0.7),
+                reason: Some(format!("Portfolio ${:.0} < $10K", total_usd)),
+            });
+        }
+
+        // ── Categorize positions ───────────────────────────────────────────
+        let mut defi_positions: Vec<&ZerionPositionRecord> = Vec::new();
+        let mut wallet_positions: Vec<&ZerionPositionRecord> = Vec::new();
+        let mut protocols: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut chains: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut protocol_usd: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let mut position_types: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+        for p in &positions {
+            chains.insert(p.chain_slug.clone());
+            *position_types.entry(p.position_type.clone()).or_insert(0) += 1;
+
+            if p.position_type == "wallet" {
+                wallet_positions.push(p);
+            } else {
+                defi_positions.push(p);
+                if let Some(ref proto) = p.protocol {
+                    protocols.insert(proto.clone());
+                    *protocol_usd.entry(proto.clone()).or_insert(0.0) += p.value_usd.unwrap_or(0.0);
+                }
+            }
+        }
+
+        // ── Protocol-specific labels ───────────────────────────────────────
+        let known_protocols: &[(&str, &str, &str)] = &[
+            ("aave-v3", "aave-user", "Aave V3"),
+            ("aave-v2", "aave-user", "Aave V2"),
+            ("uniswap-v3", "uniswap-trader", "Uniswap V3"),
+            ("uniswap-v2", "uniswap-trader", "Uniswap V2"),
+            ("lido", "lido-staker", "Lido"),
+            ("rocket-pool", "rocket-pool-staker", "Rocket Pool"),
+            ("compound-v3", "compound-user", "Compound V3"),
+            ("compound-v2", "compound-user", "Compound V2"),
+            ("curve", "curve-user", "Curve"),
+            ("maker", "maker-user", "MakerDAO"),
+            ("gmx", "gmx-trader", "GMX"),
+            ("dydx", "perp-trader", "dYdX"),
+            ("eigenlayer", "eigenlayer-restaker", "EigenLayer"),
+            ("pendle", "pendle-user", "Pendle"),
+            ("morpho", "morpho-user", "Morpho"),
+            ("spark", "spark-user", "Spark"),
+        ];
+
+        for (proto_key, label, display_name) in known_protocols {
+            if protocols.contains(*proto_key) {
+                let usd = protocol_usd.get(*proto_key).copied().unwrap_or(0.0);
+                let score = if usd >= 100_000.0 { 0.95 } else if usd >= 10_000.0 { 0.85 } else { 0.7 };
+                labels.push(ZerionLabelRecord {
+                    label: label.to_string(),
+                    score: Some(score),
+                    reason: Some(format!("{} position ${:.0}", display_name, usd)),
+                });
+            }
+        }
+
+        // ── Behavior labels ────────────────────────────────────────────────
+        // DeFi user
+        if defi_positions.len() >= 3 {
+            labels.push(ZerionLabelRecord {
+                label: "defi-user".to_string(),
+                score: Some(0.9),
+                reason: Some(format!("{} DeFi positions across {} protocols", defi_positions.len(), protocols.len())),
+            });
+        } else if !defi_positions.is_empty() {
+            labels.push(ZerionLabelRecord {
+                label: "defi-user".to_string(),
+                score: Some(0.6),
+                reason: Some(format!("{} DeFi position(s)", defi_positions.len())),
+            });
+        }
+
+        // Yield farmer: multiple deposit/earn positions
+        let deposit_count = position_types.get("deposit").copied().unwrap_or(0)
+            + position_types.get("earn").copied().unwrap_or(0);
+        if deposit_count >= 3 {
+            labels.push(ZerionLabelRecord {
+                label: "yield-farmer".to_string(),
+                score: Some(0.85),
+                reason: Some(format!("{} deposit/earn positions", deposit_count)),
+            });
+        }
+
+        // Liquidity provider: has LP positions
+        let lp_count = position_types.get("liquidity").copied().unwrap_or(0)
+            + position_types.get("lp").copied().unwrap_or(0);
+        if lp_count >= 1 {
+            labels.push(ZerionLabelRecord {
+                label: "liquidity-provider".to_string(),
+                score: Some(0.8),
+                reason: Some(format!("{} liquidity position(s)", lp_count)),
+            });
+        }
+
+        // Staker: has stake positions
+        let stake_count = position_types.get("stake").copied().unwrap_or(0)
+            + position_types.get("staking").copied().unwrap_or(0);
+        if stake_count >= 1 {
+            labels.push(ZerionLabelRecord {
+                label: "staker".to_string(),
+                score: Some(0.8),
+                reason: Some(format!("{} staking position(s)", stake_count)),
+            });
+        }
+
+        // Lender: has lend positions
+        let lend_count = position_types.get("lend").copied().unwrap_or(0)
+            + position_types.get("supply").copied().unwrap_or(0);
+        if lend_count >= 1 {
+            labels.push(ZerionLabelRecord {
+                label: "lender".to_string(),
+                score: Some(0.75),
+                reason: Some(format!("{} lending position(s)", lend_count)),
+            });
+        }
+
+        // Borrower: has borrow positions
+        let borrow_count = position_types.get("borrow").copied().unwrap_or(0)
+            + position_types.get("debt").copied().unwrap_or(0);
+        if borrow_count >= 1 {
+            labels.push(ZerionLabelRecord {
+                label: "borrower".to_string(),
+                score: Some(0.75),
+                reason: Some(format!("{} borrow position(s)", borrow_count)),
+            });
+        }
+
+        // Multi-chain user
+        if chains.len() >= 3 {
+            labels.push(ZerionLabelRecord {
+                label: "multi-chain".to_string(),
+                score: Some(0.8),
+                reason: Some(format!("Active on {} chains", chains.len())),
+            });
+        }
+
+        // Diverse portfolio
+        if wallet_positions.len() >= 10 {
+            labels.push(ZerionLabelRecord {
+                label: "diverse-portfolio".to_string(),
+                score: Some(0.7),
+                reason: Some(format!("Holds {} different tokens", wallet_positions.len())),
+            });
+        }
+
+        // ── Risk profile labels ────────────────────────────────────────────
+        let degen_protocols = ["gmx", "dydx", "kwenta", "gains", "vela"];
+        let is_degen = degen_protocols.iter().any(|p| protocols.contains(*p));
+        if is_degen {
+            labels.push(ZerionLabelRecord {
+                label: "degen".to_string(),
+                score: Some(0.85),
+                reason: Some("Uses high-risk protocols (perps/leverage)".to_string()),
+            });
+        }
+
+        let blue_chip = ["aave-v3", "aave-v2", "lido", "compound-v3", "maker"];
+        let blue_chip_count = blue_chip.iter().filter(|p| protocols.contains(**p)).count();
+        if blue_chip_count >= 2 && !is_degen && defi_positions.len() <= 5 {
+            labels.push(ZerionLabelRecord {
+                label: "conservative".to_string(),
+                score: Some(0.75),
+                reason: Some(format!("Uses {} blue-chip protocols only", blue_chip_count)),
+            });
+        }
+
+        Ok(labels)
     }
 
     pub async fn transactions(

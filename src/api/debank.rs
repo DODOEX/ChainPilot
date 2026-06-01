@@ -55,13 +55,50 @@ struct DebankProtocol {
 
 #[derive(Debug, Deserialize)]
 struct DebankPortfolioItem {
+    name: Option<String>,
+    chain: Option<String>,
     #[serde(default)]
     stats: Option<DebankPortfolioStats>,
+    #[serde(default)]
+    detail: Option<DebankPortfolioDetail>,
 }
 
 #[derive(Debug, Deserialize)]
 struct DebankPortfolioStats {
     net_usd_value: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct DebankPortfolioDetail {
+    #[serde(default)]
+    supply_token_list: Vec<DebankDetailToken>,
+    #[serde(default)]
+    reward_token_list: Vec<DebankDetailToken>,
+    #[serde(default)]
+    borrow_token_list: Vec<DebankDetailToken>,
+    #[serde(default)]
+    token_pair: Option<DebankDetailTokenPair>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DebankDetailToken {
+    amount: Option<f64>,
+    #[serde(default)]
+    token: Option<DebankDetailTokenInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct DebankDetailTokenInfo {
+    symbol: Option<String>,
+    name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DebankDetailTokenPair {
+    #[serde(default)]
+    tokens: Vec<DebankDetailTokenInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +127,23 @@ pub struct DebankProtocolRecord {
     pub chain: String,
     pub net_usd_value: Option<f64>,
     pub site_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeFiPositionRecord {
+    pub protocol: String,
+    pub position_name: String,
+    pub chain: String,
+    pub value_usd: Option<f64>,
+    pub tokens: Vec<DeFiPositionToken>,
+    pub position_type: String,
+    pub site_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeFiPositionToken {
+    pub symbol: String,
+    pub amount: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +200,35 @@ pub struct DebankHistoryRecord {
     pub value_usd: Option<f64>,
     pub amount: Option<f64>,
     pub success: Option<bool>,
+}
+
+// ── wallet labels ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct LabelListResp {
+    #[serde(default)]
+    labels: Vec<LabelItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LabelItem {
+    name: Option<String>,
+    #[serde(default)]
+    tags: Vec<LabelTag>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LabelTag {
+    name: Option<String>,
+    score: Option<f64>,
+    reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DebankLabelRecord {
+    pub label: String,
+    pub score: Option<f64>,
+    pub reason: Option<String>,
 }
 
 impl DebankClient {
@@ -292,6 +375,161 @@ impl DebankClient {
             .collect())
     }
 
+    pub async fn defi_positions(&self, address: &str) -> Result<Vec<DeFiPositionRecord>> {
+        self.require_key()?;
+        let url = format!("{}/user/all_complex_protocol_list", self.base_url);
+        let req = self
+            .client
+            .get(&url)
+            .header("AccessKey", &self.api_key)
+            .header("accept", "application/json")
+            .timeout(Duration::from_secs(15))
+            .query(&[("id", address)]);
+        let resp: Vec<DebankProtocol> = send_retrying(req, "debank.defi_positions")
+            .await?
+            .error_for_status()
+            .map_err(map_http_err)?
+            .json()
+            .await
+            .map_err(map_http_err)?;
+
+        let mut positions = Vec::new();
+        for p in resp {
+            let protocol = match p.name {
+                Some(n) if !n.is_empty() => n,
+                _ => continue,
+            };
+            let chain = p.chain.clone().unwrap_or_default();
+            let site_url = p.site_url.clone();
+
+            if p.portfolio_item_list.is_empty() {
+                // No sub-items — treat the protocol itself as a single position.
+                let value_usd = p.net_usd_value.or(p.asset_usd_value);
+                if value_usd.unwrap_or(0.0) <= 0.0 {
+                    continue;
+                }
+                positions.push(DeFiPositionRecord {
+                    position_name: protocol.clone(),
+                    protocol,
+                    chain,
+                    value_usd,
+                    tokens: Vec::new(),
+                    position_type: "protocol".to_string(),
+                    site_url,
+                });
+                continue;
+            }
+
+            for item in &p.portfolio_item_list {
+                let value_usd = item.stats.as_ref().and_then(|s| s.net_usd_value);
+                if value_usd.unwrap_or(0.0) <= 0.0 {
+                    continue;
+                }
+                let position_name = item
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| protocol.clone());
+                let item_chain = item.chain.clone().unwrap_or_else(|| chain.clone());
+
+                let mut tokens = Vec::new();
+                if let Some(ref detail) = item.detail {
+                    for t in &detail.supply_token_list {
+                        if let Some(ref info) = t.token {
+                            tokens.push(DeFiPositionToken {
+                                symbol: info
+                                    .symbol
+                                    .clone()
+                                    .unwrap_or_else(|| "unknown".to_string()),
+                                amount: t.amount,
+                            });
+                        }
+                    }
+                    for t in &detail.reward_token_list {
+                        if let Some(ref info) = t.token {
+                            tokens.push(DeFiPositionToken {
+                                symbol: info
+                                    .symbol
+                                    .clone()
+                                    .unwrap_or_else(|| "unknown".to_string()),
+                                amount: t.amount,
+                            });
+                        }
+                    }
+                    if let Some(ref pair) = detail.token_pair {
+                        let symbols: Vec<String> = pair
+                            .tokens
+                            .iter()
+                            .filter_map(|t| t.symbol.clone())
+                            .collect();
+                        if !symbols.is_empty() {
+                            tokens.push(DeFiPositionToken {
+                                symbol: symbols.join("/"),
+                                amount: None,
+                            });
+                        }
+                    }
+                }
+
+                let position_type = classify_position(&item.name, &tokens);
+
+                positions.push(DeFiPositionRecord {
+                    protocol: protocol.clone(),
+                    position_name,
+                    chain: item_chain,
+                    value_usd,
+                    tokens,
+                    position_type,
+                    site_url: site_url.clone(),
+                });
+            }
+        }
+        Ok(positions)
+    }
+
+    pub async fn wallet_labels(&self, address: &str) -> Result<Vec<DebankLabelRecord>> {
+        self.require_key()?;
+        let url = format!("{}/user/label", self.base_url);
+        let req = self
+            .client
+            .get(&url)
+            .header("AccessKey", &self.api_key)
+            .header("accept", "application/json")
+            .timeout(Duration::from_secs(10))
+            .query(&[("id", address)]);
+        let resp: LabelListResp = send_retrying(req, "debank.wallet_labels")
+            .await?
+            .error_for_status()
+            .map_err(map_http_err)?
+            .json()
+            .await
+            .map_err(map_http_err)?;
+
+        let mut records = Vec::new();
+        for item in resp.labels {
+            if let Some(label_name) = item.name {
+                if !label_name.is_empty() {
+                    records.push(DebankLabelRecord {
+                        label: label_name,
+                        score: None,
+                        reason: None,
+                    });
+                }
+            }
+            for tag in item.tags {
+                if let Some(tag_name) = tag.name {
+                    if !tag_name.is_empty() {
+                        records.push(DebankLabelRecord {
+                            label: tag_name,
+                            score: tag.score,
+                            reason: tag.reason,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(records)
+    }
+
     pub async fn all_history_list(
         &self,
         address: &str,
@@ -420,6 +658,38 @@ pub fn debank_chain_to_id(chain: &str) -> Option<u64> {
         "taiko" => Some(167000),
         _ => None,
     }
+}
+
+fn classify_position(name: &Option<String>, tokens: &[DeFiPositionToken]) -> String {
+    let name_lower = name
+        .as_deref()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if name_lower.contains("deposit") || name_lower.contains("supply") || name_lower.contains("lend")
+    {
+        return "deposit".to_string();
+    }
+    if name_lower.contains("borrow") || name_lower.contains("debt") {
+        return "borrow".to_string();
+    }
+    if name_lower.contains("stake") || name_lower.contains("staking") {
+        return "stake".to_string();
+    }
+    if name_lower.contains("liquidity") || name_lower.contains(" lp") || name_lower.contains("pool")
+    {
+        return "liquidity".to_string();
+    }
+    if name_lower.contains("farm") || name_lower.contains("yield") {
+        return "yield".to_string();
+    }
+    if name_lower.contains("vault") {
+        return "vault".to_string();
+    }
+    // If there are two tokens named together (LP pair), treat as liquidity.
+    if tokens.len() == 2 {
+        return "liquidity".to_string();
+    }
+    "position".to_string()
 }
 
 #[cfg(test)]

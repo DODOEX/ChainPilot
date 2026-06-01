@@ -1,11 +1,13 @@
 mod debank;
 mod dodo;
+mod dune;
 mod goldrush;
 mod token_metadata;
 mod zerion;
 
 pub use debank::{debank_chain_to_id, DebankAssetRecord, DebankClient};
 pub use dodo::DodoClient;
+pub use dune::DuneClient;
 pub use goldrush::{GoldrushAssetRecord, GoldrushChainBalance, GoldrushClient};
 pub use token_metadata::TokenMetadataClient;
 pub use zerion::{ZerionChainBalance, ZerionClient, ZerionPortfolio, ZerionPositionRecord};
@@ -81,6 +83,7 @@ pub struct ApiClients {
     pub debank: DebankClient,
     pub zerion: ZerionClient,
     pub goldrush: GoldrushClient,
+    pub dune: DuneClient,
 }
 
 impl ApiClients {
@@ -121,9 +124,14 @@ impl ApiClients {
                 &config.zerion_api_key,
             ),
             goldrush: GoldrushClient::new(
-                client,
+                client.clone(),
                 &config.goldrush_api_url,
                 &config.goldrush_api_key,
+            ),
+            dune: DuneClient::new(
+                client,
+                &config.dune_api_url,
+                &config.dune_api_key,
             ),
         })
     }

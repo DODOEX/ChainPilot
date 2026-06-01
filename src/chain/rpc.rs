@@ -312,6 +312,8 @@ mod tests {
             goldrush_api_key: m.goldrush_api_key,
             zerion_api_url: m.zerion_api_url,
             zerion_api_key: m.zerion_api_key,
+            dune_api_url: m.dune_api_url,
+            dune_api_key: m.dune_api_key,
             data_dir: std::env::temp_dir(),
         }
     }

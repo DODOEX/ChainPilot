@@ -17,6 +17,7 @@ const CONFIGURABLE_KEYS: &[(&str, &str, bool)] = &[
     ("debank_api_key", "DEBANK_API_KEY", true),
     ("zerion_api_key", "ZERION_API_KEY", true),
     ("goldrush_api_key", "GOLDRUSH_API_KEY", true),
+    ("dune_api_key", "DUNE_API_KEY", true),
 ];
 
 fn find_key(key: &str) -> Option<(&'static str, &'static str, bool)> {

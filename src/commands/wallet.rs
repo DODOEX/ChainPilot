@@ -5,12 +5,13 @@ use crate::api::{
     debank_chain_to_id, ApiClients, GoldrushChainBalance, ZerionPortfolio, ZerionPositionRecord,
 };
 use crate::chain::{get_eth_balance, OnChainClient};
-use crate::cli::wallet::{BalanceArgs, HistoryArgs, OverviewArgs, PnlArgs, WalletAction, WalletCmd};
+use crate::cli::wallet::{BalanceArgs, DefiArgs, HistoryArgs, LabelsArgs, OverviewArgs, PnlArgs, WalletAction, WalletCmd};
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
 use crate::models::wallet::{
-    ActiveProtocol, ChainAllocation, TokenAllocation, TopHolding, WalletAsset, WalletBalance,
-    WalletBalanceSources, WalletHistory, WalletOverview, WalletOverviewSources, WalletPnl,
+    ActiveProtocol, ChainAllocation, DefiPosition, DefiPositionToken, LabelScore,
+    TokenAllocation, TopHolding, WalletAsset, WalletBalance, WalletBalanceSources, WalletDefi,
+    WalletHistory, WalletLabels, WalletOverview, WalletOverviewSources, WalletPnl,
     WalletTransaction,
 };
 use std::sync::Arc;
@@ -37,6 +38,8 @@ pub async fn handle(
         WalletAction::Overview(args) => overview(args, api, config, output_mode).await,
         WalletAction::Pnl(args) => pnl(args, api, config, output_mode).await,
         WalletAction::History(args) => history(args, api, config, output_mode).await,
+        WalletAction::Labels(args) => labels(args, api, config, output_mode).await,
+        WalletAction::Defi(args) => defi(args, api, config, output_mode).await,
     }
 }
 
@@ -1075,6 +1078,313 @@ async fn build_history(args: &HistoryArgs, api: &ApiClients) -> Result<WalletHis
          Run: chainpilot config set zerion_api_key <key>"
             .to_string(),
     ))
+}
+
+async fn labels(
+    args: LabelsArgs,
+    api: &ApiClients,
+    config: &AppConfig,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    let chain_id = config.chain_id;
+    let ctx = OutputContext::new(chain_id, false);
+
+    if args.address.parse::<Address>().is_err() {
+        return Ok(crate::output::print_output::<WalletLabels>(
+            Err(ChainError::InvalidAddress(args.address.clone())),
+            "wallet.labels",
+            output_mode,
+            ctx,
+        ));
+    }
+
+    let result = build_labels(&args, api).await;
+    Ok(crate::output::print_output::<WalletLabels>(
+        result,
+        "wallet.labels",
+        output_mode,
+        ctx,
+    ))
+}
+
+async fn build_labels(args: &LabelsArgs, api: &ApiClients) -> Result<WalletLabels> {
+    let mut last_err: Option<ChainError> = None;
+
+    if api.debank.is_configured() {
+        match build_labels_from_debank(args, api).await {
+            Ok(labels) => return Ok(labels),
+            Err(e) => {
+                tracing::warn!("Debank labels lookup failed: {e}. Falling back to Dune.");
+                last_err = Some(e);
+            }
+        }
+    }
+
+    if api.dune.is_configured() {
+        match build_labels_from_dune(args, api).await {
+            Ok(labels) => return Ok(labels),
+            Err(e) => {
+                tracing::warn!("Dune labels lookup failed: {e}. Falling back to Zerion.");
+                last_err = Some(e);
+            }
+        }
+    }
+
+    if api.zerion.is_configured() {
+        match build_labels_from_zerion(args, api).await {
+            Ok(labels) => return Ok(labels),
+            Err(e) => {
+                tracing::warn!("Zerion labels lookup failed: {e}.");
+                last_err = Some(e);
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| ChainError::Config(
+        "Wallet labels requires DEBANK_API_KEY, DUNE_API_KEY, or ZERION_API_KEY. Run: \
+         chainpilot config set debank_api_key <key> (preferred), \
+         chainpilot config set dune_api_key <key>, or \
+         chainpilot config set zerion_api_key <key>"
+            .to_string(),
+    )))
+}
+
+async fn build_labels_from_debank(
+    args: &LabelsArgs,
+    api: &ApiClients,
+) -> Result<WalletLabels> {
+    let records = api.debank.wallet_labels(&args.address).await?;
+
+    let labels: Vec<String> = records.iter().map(|r| r.label.clone()).collect();
+    let label_scores: Vec<LabelScore> = records
+        .into_iter()
+        .map(|r| LabelScore {
+            label: r.label,
+            score: r.score,
+            reason: r.reason,
+        })
+        .collect();
+
+    Ok(WalletLabels {
+        wallet: args.address.clone(),
+        labels,
+        label_scores,
+        source: "debank".to_string(),
+    })
+}
+
+async fn build_labels_from_dune(
+    args: &LabelsArgs,
+    api: &ApiClients,
+) -> Result<WalletLabels> {
+    let records = api.dune.wallet_labels(&args.address).await?;
+
+    let labels: Vec<String> = records.iter().map(|r| r.label.clone()).collect();
+    let label_scores: Vec<LabelScore> = records
+        .into_iter()
+        .map(|r| LabelScore {
+            label: r.label,
+            score: r.score,
+            reason: r.reason,
+        })
+        .collect();
+
+    Ok(WalletLabels {
+        wallet: args.address.clone(),
+        labels,
+        label_scores,
+        source: "dune".to_string(),
+    })
+}
+
+async fn build_labels_from_zerion(
+    args: &LabelsArgs,
+    api: &ApiClients,
+) -> Result<WalletLabels> {
+    let records = api.zerion.wallet_labels(&args.address).await?;
+
+    let labels: Vec<String> = records.iter().map(|r| r.label.clone()).collect();
+    let label_scores: Vec<LabelScore> = records
+        .into_iter()
+        .map(|r| LabelScore {
+            label: r.label,
+            score: r.score,
+            reason: r.reason,
+        })
+        .collect();
+
+    Ok(WalletLabels {
+        wallet: args.address.clone(),
+        labels,
+        label_scores,
+        source: "zerion".to_string(),
+    })
+}
+
+async fn defi(
+    args: DefiArgs,
+    api: &ApiClients,
+    config: &AppConfig,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    let chain_id = config.chain_id;
+    let ctx = OutputContext::new(chain_id, false);
+
+    if args.address.parse::<Address>().is_err() {
+        return Ok(crate::output::print_output::<WalletDefi>(
+            Err(ChainError::InvalidAddress(args.address.clone())),
+            "wallet.defi",
+            output_mode,
+            ctx,
+        ));
+    }
+
+    let result = build_defi(&args, api, config).await;
+    Ok(crate::output::print_output::<WalletDefi>(
+        result,
+        "wallet.defi",
+        output_mode,
+        ctx,
+    ))
+}
+
+async fn build_defi(
+    args: &DefiArgs,
+    api: &ApiClients,
+    config: &AppConfig,
+) -> Result<WalletDefi> {
+    let chain_filter = config.chain_id_overridden.then_some(config.chain_id);
+    let mut last_err: Option<ChainError> = None;
+
+    if api.debank.is_configured() {
+        match build_defi_from_debank(args, api, chain_filter).await {
+            Ok(defi) => return Ok(defi),
+            Err(e) => {
+                tracing::warn!("Debank DeFi lookup failed: {e}. Falling back to Zerion.");
+                last_err = Some(e);
+            }
+        }
+    }
+
+    if api.zerion.is_configured() {
+        match build_defi_from_zerion(args, api, chain_filter).await {
+            Ok(defi) => return Ok(defi),
+            Err(e) => {
+                tracing::warn!("Zerion DeFi lookup failed: {e}.");
+                last_err = Some(e);
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| ChainError::Config(
+        "DeFi positions requires DEBANK_API_KEY or ZERION_API_KEY. Run: \
+         chainpilot config set debank_api_key <key> (preferred) or \
+         chainpilot config set zerion_api_key <key>"
+            .to_string(),
+    )))
+}
+
+async fn build_defi_from_debank(
+    args: &DefiArgs,
+    api: &ApiClients,
+    chain_filter: Option<u64>,
+) -> Result<WalletDefi> {
+    let raw = api.debank.defi_positions(&args.address).await?;
+
+    let positions: Vec<DefiPosition> = raw
+        .into_iter()
+        .filter(|p| chain_filter.is_none_or(|id| {
+            crate::api::debank_chain_to_id(&p.chain) == Some(id)
+        }))
+        .filter(|p| p.value_usd.unwrap_or(0.0) >= args.min_usd)
+        .map(|p| DefiPosition {
+            protocol: p.protocol,
+            position_name: p.position_name,
+            chain: p.chain,
+            value_usd: p.value_usd,
+            tokens: p
+                .tokens
+                .into_iter()
+                .map(|t| DefiPositionToken {
+                    symbol: t.symbol,
+                    amount: t.amount,
+                })
+                .collect(),
+            position_type: p.position_type,
+            site_url: p.site_url,
+        })
+        .collect();
+
+    let total_value_usd = Some(
+        positions
+            .iter()
+            .map(|p| p.value_usd.unwrap_or(0.0))
+            .sum(),
+    );
+
+    Ok(WalletDefi {
+        wallet: args.address.clone(),
+        total_value_usd,
+        positions,
+        source: "debank".to_string(),
+    })
+}
+
+async fn build_defi_from_zerion(
+    args: &DefiArgs,
+    api: &ApiClients,
+    chain_filter: Option<u64>,
+) -> Result<WalletDefi> {
+    // `no_filter` returns DeFi positions too (deposit, stake, lend, etc.).
+    let positions = api
+        .zerion
+        .positions(&args.address, false, chain_filter)
+        .await?;
+
+    let positions: Vec<DefiPosition> = positions
+        .into_iter()
+        .filter(|p| p.position_type != "wallet")
+        .filter(|p| p.value_usd.unwrap_or(0.0) >= args.min_usd)
+        .map(|p| {
+            let mut tokens = Vec::new();
+            if !p.symbol.is_empty() {
+                tokens.push(DefiPositionToken {
+                    symbol: p.symbol.clone(),
+                    amount: Some(p.amount),
+                });
+            }
+            DefiPosition {
+                protocol: p
+                    .protocol
+                    .clone()
+                    .or_else(|| p.display_name.clone())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                position_name: p
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| p.name.clone()),
+                chain: p.chain_slug,
+                value_usd: p.value_usd,
+                tokens,
+                position_type: p.position_type,
+                site_url: p.protocol_url,
+            }
+        })
+        .collect();
+
+    let total_value_usd = Some(
+        positions
+            .iter()
+            .map(|p| p.value_usd.unwrap_or(0.0))
+            .sum(),
+    );
+
+    Ok(WalletDefi {
+        wallet: args.address.clone(),
+        total_value_usd,
+        positions,
+        source: "zerion".to_string(),
+    })
 }
 
 #[cfg(test)]
