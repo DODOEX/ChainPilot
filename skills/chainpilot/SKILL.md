@@ -510,6 +510,10 @@ chainpilot wallet balance <ADDRESS> [--min-usd <USD>]
 chainpilot --chain-id 8453 wallet balance <ADDRESS>
 ```
 
+No API key strictly required — falls through to on-chain native balance if no
+aggregator is configured (but USD values will be `null`). Best results with
+`debank_api_key` (preferred), `zerion_api_key`, or `goldrush_api_key`.
+
 | Field | Type | Notes |
 |---|---|---|
 | `wallet` | string | Echo of the input address |
@@ -526,6 +530,9 @@ chainpilot --chain-id 8453 wallet balance <ADDRESS>
 chainpilot wallet overview <ADDRESS> [--top <N>]
 chainpilot --chain-id 1 wallet overview <ADDRESS>
 ```
+
+Requires `debank_api_key` (preferred), `zerion_api_key`, or `goldrush_api_key`
+(at least one). Errors if none are configured.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -566,7 +573,8 @@ Wallet PnL (profit and loss) analysis. Requires `zerion_api_key`.
 chainpilot wallet history <ADDRESS> [--limit <N>]
 ```
 
-Transaction history. Primary: Zerion; fallback: Debank.
+Transaction history. Requires `zerion_api_key` or `debank_api_key` (at least one;
+Zerion is tried first, Debank is the fallback).
 
 | Flag | Default | Notes |
 |---|---|---|
@@ -592,7 +600,8 @@ Transaction history. Primary: Zerion; fallback: Debank.
 chainpilot wallet labels <ADDRESS>
 ```
 
-Wallet behavioral labels and tags. Tries Debank → Dune → Zerion in order.
+Wallet behavioral labels and tags. Requires `debank_api_key`, `dune_api_key`, or
+`zerion_api_key` (at least one; Debank is tried first, then Dune, then Zerion).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -617,8 +626,8 @@ chainpilot --chain-id 1 wallet defi <ADDRESS>
 ```
 
 DeFi positions across protocols — deposits, LPs, staking, borrows, etc.
-Primary: Debank (`all_complex_protocol_list`, per-portfolio-item extraction);
-fallback: Zerion (`positions` with `no_filter`).
+Requires `debank_api_key` or `zerion_api_key` (at least one; Debank is the
+primary source with per-portfolio-item extraction, Zerion is the fallback).
 
 | Flag | Default | Notes |
 |---|---|---|
