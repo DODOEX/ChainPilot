@@ -9,17 +9,17 @@ pub struct WalletCmd {
 
 #[derive(Subcommand)]
 pub enum WalletAction {
-    /// Aggregated wallet balance (total USD, assets, chain allocation)
+    /// Aggregated wallet balance (total USD, assets, chain allocation). No API key required; falls back to on-chain native balance. Best with DEBANK_API_KEY, ZERION_API_KEY, or GOLDRUSH_API_KEY
     Balance(BalanceArgs),
-    /// Wallet portfolio overview (chain/token allocation, active protocols, top holdings)
+    /// Wallet portfolio overview (chain/token allocation, active protocols, top holdings). Requires DEBANK_API_KEY, ZERION_API_KEY, or GOLDRUSH_API_KEY
     Overview(OverviewArgs),
-    /// Wallet PnL analysis (realized/unrealized gains, ROI, win rate)
+    /// Wallet PnL analysis (realized/unrealized gains, ROI, win rate). Requires ZERION_API_KEY (no fallback)
     Pnl(PnlArgs),
-    /// Wallet transaction history
+    /// Wallet transaction history. Requires ZERION_API_KEY or DEBANK_API_KEY
     History(HistoryArgs),
-    /// Wallet labels and behavioral tags
+    /// Wallet labels and behavioral tags. Requires DEBANK_API_KEY, DUNE_API_KEY, or ZERION_API_KEY
     Labels(LabelsArgs),
-    /// DeFi positions across protocols (deposits, LPs, staking, borrows)
+    /// DeFi positions across protocols (deposits, LPs, staking, borrows). Requires DEBANK_API_KEY or ZERION_API_KEY
     Defi(DefiArgs),
 }
 
