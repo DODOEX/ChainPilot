@@ -41,6 +41,12 @@ powershell -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.c
 
 This downloads the latest Windows release into `%USERPROFILE%\.chainpilot\bin` and adds it to your user `PATH`.
 
+**Manual download:**
+
+Download the pre-built binary for your platform from the
+[GitHub Releases](https://github.com/DODOEX/ChainPilot/releases) page,
+then place it in a directory on your `PATH`.
+
 **Build from source:**
 ```bash
 cargo build --release
