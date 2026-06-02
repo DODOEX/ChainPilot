@@ -363,7 +363,11 @@ impl DebankClient {
                         .iter()
                         .filter_map(|i| i.stats.as_ref().and_then(|s| s.net_usd_value))
                         .sum();
-                    if sum > 0.0 { Some(sum) } else { p.asset_usd_value }
+                    if sum > 0.0 {
+                        Some(sum)
+                    } else {
+                        p.asset_usd_value
+                    }
                 });
                 Some(DebankProtocolRecord {
                     name,
@@ -425,10 +429,7 @@ impl DebankClient {
                 if value_usd.unwrap_or(0.0) <= 0.0 {
                     continue;
                 }
-                let position_name = item
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| protocol.clone());
+                let position_name = item.name.clone().unwrap_or_else(|| protocol.clone());
                 let item_chain = item.chain.clone().unwrap_or_else(|| chain.clone());
 
                 let mut tokens = Vec::new();
@@ -573,24 +574,20 @@ impl DebankClient {
                 let action = debank_cate_to_action(h.cate_id.as_deref());
 
                 let token_out = h.receives.first().and_then(|t| {
-                    t.token_id.as_ref().and_then(|id| {
-                        token_dict
-                            .get(id)
-                            .and_then(|info| info.symbol.clone())
-                    })
+                    t.token_id
+                        .as_ref()
+                        .and_then(|id| token_dict.get(id).and_then(|info| info.symbol.clone()))
                 });
                 let token_in = h.sends.first().and_then(|t| {
-                    t.token_id.as_ref().and_then(|id| {
-                        token_dict
-                            .get(id)
-                            .and_then(|info| info.symbol.clone())
-                    })
+                    t.token_id
+                        .as_ref()
+                        .and_then(|id| token_dict.get(id).and_then(|info| info.symbol.clone()))
                 });
                 let amount = h.sends.first().and_then(|t| t.amount);
 
-                let success = h.tx.as_ref().and_then(|tx| {
-                    tx.status.as_deref().map(|s| s == "ok")
-                });
+                let success =
+                    h.tx.as_ref()
+                        .and_then(|tx| tx.status.as_deref().map(|s| s == "ok"));
 
                 Some(DebankHistoryRecord {
                     tx_hash,
@@ -661,11 +658,10 @@ pub fn debank_chain_to_id(chain: &str) -> Option<u64> {
 }
 
 fn classify_position(name: &Option<String>, tokens: &[DeFiPositionToken]) -> String {
-    let name_lower = name
-        .as_deref()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if name_lower.contains("deposit") || name_lower.contains("supply") || name_lower.contains("lend")
+    let name_lower = name.as_deref().unwrap_or("").to_ascii_lowercase();
+    if name_lower.contains("deposit")
+        || name_lower.contains("supply")
+        || name_lower.contains("lend")
     {
         return "deposit".to_string();
     }

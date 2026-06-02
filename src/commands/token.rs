@@ -301,14 +301,14 @@ async fn risk(
                 .search_symbol(&args.token, chain_id)
                 .await;
             if search.candidates.is_empty() {
-                return Ok(crate::output::print_output::<
-                    crate::models::token::TokenRisk,
-                >(
-                    Err(ChainError::TokenNotFound(args.token)),
-                    "token.risk",
-                    output_mode,
-                    OutputContext::new(chain_id, false),
-                ));
+                return Ok(
+                    crate::output::print_output::<crate::models::token::TokenRisk>(
+                        Err(ChainError::TokenNotFound(args.token)),
+                        "token.risk",
+                        output_mode,
+                        OutputContext::new(chain_id, false),
+                    ),
+                );
             }
             return Ok(crate::output::print_output::<
                 crate::models::token::TokenSearchResult,
@@ -320,28 +320,28 @@ async fn risk(
             ));
         }
         Err(e) => {
-            return Ok(crate::output::print_output::<
-                crate::models::token::TokenRisk,
-            >(
-                Err(e),
-                "token.risk",
-                output_mode,
-                OutputContext::new(chain_id, false),
-            ));
+            return Ok(
+                crate::output::print_output::<crate::models::token::TokenRisk>(
+                    Err(e),
+                    "token.risk",
+                    output_mode,
+                    OutputContext::new(chain_id, false),
+                ),
+            );
         }
     };
     let result = api
         .token_metadata
         .fetch_risk(chain_id, &token_ref.address, &token_ref.symbol)
         .await;
-    Ok(crate::output::print_output::<
-        crate::models::token::TokenRisk,
-    >(
-        Ok(result),
-        "token.risk",
-        output_mode,
-        OutputContext::new(chain_id, false),
-    ))
+    Ok(
+        crate::output::print_output::<crate::models::token::TokenRisk>(
+            Ok(result),
+            "token.risk",
+            output_mode,
+            OutputContext::new(chain_id, false),
+        ),
+    )
 }
 
 async fn contract(
@@ -494,9 +494,7 @@ async fn fee(_args: TokenFeeArgs, config: &AppConfig, output_mode: OutputMode) -
     let native_symbol = chain_cfg
         .map(|cfg| cfg.native_token.symbol)
         .unwrap_or("ETH");
-    let native_decimals = chain_cfg
-        .map(|cfg| cfg.native_token.decimals)
-        .unwrap_or(18);
+    let native_decimals = chain_cfg.map(|cfg| cfg.native_token.decimals).unwrap_or(18);
     let result = TokenCreateFee {
         chain_id,
         factory: factory.to_string(),

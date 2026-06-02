@@ -5,14 +5,15 @@ use crate::api::{
     debank_chain_to_id, ApiClients, GoldrushChainBalance, ZerionPortfolio, ZerionPositionRecord,
 };
 use crate::chain::{get_eth_balance, OnChainClient};
-use crate::cli::wallet::{BalanceArgs, DefiArgs, HistoryArgs, LabelsArgs, OverviewArgs, PnlArgs, WalletAction, WalletCmd};
+use crate::cli::wallet::{
+    BalanceArgs, DefiArgs, HistoryArgs, LabelsArgs, OverviewArgs, PnlArgs, WalletAction, WalletCmd,
+};
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
 use crate::models::wallet::{
-    ActiveProtocol, ChainAllocation, DefiPosition, DefiPositionToken, LabelScore,
-    TokenAllocation, TopHolding, WalletAsset, WalletBalance, WalletBalanceSources, WalletDefi,
-    WalletHistory, WalletLabels, WalletOverview, WalletOverviewSources, WalletPnl,
-    WalletTransaction,
+    ActiveProtocol, ChainAllocation, DefiPosition, DefiPositionToken, LabelScore, TokenAllocation,
+    TopHolding, WalletAsset, WalletBalance, WalletBalanceSources, WalletDefi, WalletHistory,
+    WalletLabels, WalletOverview, WalletOverviewSources, WalletPnl, WalletTransaction,
 };
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -203,7 +204,10 @@ async fn fetch_balance_from_goldrush(
         )));
     }
 
-    let chain_total: f64 = chain_balances.iter().map(GoldrushChainBalance::total_usd).sum();
+    let chain_total: f64 = chain_balances
+        .iter()
+        .map(GoldrushChainBalance::total_usd)
+        .sum();
 
     let assets: Vec<WalletAsset> = chain_balances
         .iter()
@@ -388,13 +392,15 @@ async fn build_overview(
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| ChainError::Config(
-        "wallet overview requires Debank, Zerion, or Goldrush. Run: \
+    Err(last_err.unwrap_or_else(|| {
+        ChainError::Config(
+            "wallet overview requires Debank, Zerion, or Goldrush. Run: \
          chainpilot config set debank_api_key <key> (preferred), \
          chainpilot config set zerion_api_key <key>, or \
          chainpilot config set goldrush_api_key <key>"
-            .to_string(),
-    )))
+                .to_string(),
+        )
+    }))
 }
 
 async fn build_overview_from_debank(
@@ -504,7 +510,10 @@ async fn build_overview_from_goldrush(
         )));
     }
 
-    let chain_total: f64 = chain_balances.iter().map(GoldrushChainBalance::total_usd).sum();
+    let chain_total: f64 = chain_balances
+        .iter()
+        .map(GoldrushChainBalance::total_usd)
+        .sum();
 
     let chain_allocation: Vec<ChainAllocation> = chain_balances
         .iter()
@@ -696,10 +705,7 @@ fn aggregate_token_allocation(
     allocs
 }
 
-fn build_top_holdings(
-    tokens: &[crate::api::DebankAssetRecord],
-    limit: usize,
-) -> Vec<TopHolding> {
+fn build_top_holdings(tokens: &[crate::api::DebankAssetRecord], limit: usize) -> Vec<TopHolding> {
     let mut holdings: Vec<TopHolding> = tokens
         .iter()
         .filter_map(|t| {
@@ -754,11 +760,7 @@ fn debank_chain_matches(slug: &str, community_id: Option<u64>, filter: Option<u6
 ///    balances_v2 requests on chains the wallet has never touched.
 /// 3. If activity is empty or fails, fall back to every supported chain so
 ///    we still return data when the cheap path is unavailable.
-async fn resolve_goldrush_chains(
-    api: &ApiClients,
-    config: &AppConfig,
-    address: &str,
-) -> Vec<u64> {
+async fn resolve_goldrush_chains(api: &ApiClients, config: &AppConfig, address: &str) -> Vec<u64> {
     if config.chain_id_overridden {
         return vec![config.chain_id];
     }
@@ -768,7 +770,10 @@ async fn resolve_goldrush_chains(
 
     match api.goldrush.active_chains(address).await {
         Ok(active) => {
-            let scoped: Vec<u64> = active.into_iter().filter(|c| supported.contains(c)).collect();
+            let scoped: Vec<u64> = active
+                .into_iter()
+                .filter(|c| supported.contains(c))
+                .collect();
             if !scoped.is_empty() {
                 return scoped;
             }
@@ -1140,19 +1145,18 @@ async fn build_labels(args: &LabelsArgs, api: &ApiClients) -> Result<WalletLabel
         }
     }
 
-    Err(last_err.unwrap_or_else(|| ChainError::Config(
-        "Wallet labels requires DEBANK_API_KEY, DUNE_API_KEY, or ZERION_API_KEY. Run: \
+    Err(last_err.unwrap_or_else(|| {
+        ChainError::Config(
+            "Wallet labels requires DEBANK_API_KEY, DUNE_API_KEY, or ZERION_API_KEY. Run: \
          chainpilot config set debank_api_key <key> (preferred), \
          chainpilot config set dune_api_key <key>, or \
          chainpilot config set zerion_api_key <key>"
-            .to_string(),
-    )))
+                .to_string(),
+        )
+    }))
 }
 
-async fn build_labels_from_debank(
-    args: &LabelsArgs,
-    api: &ApiClients,
-) -> Result<WalletLabels> {
+async fn build_labels_from_debank(args: &LabelsArgs, api: &ApiClients) -> Result<WalletLabels> {
     let records = api.debank.wallet_labels(&args.address).await?;
 
     let labels: Vec<String> = records.iter().map(|r| r.label.clone()).collect();
@@ -1173,10 +1177,7 @@ async fn build_labels_from_debank(
     })
 }
 
-async fn build_labels_from_dune(
-    args: &LabelsArgs,
-    api: &ApiClients,
-) -> Result<WalletLabels> {
+async fn build_labels_from_dune(args: &LabelsArgs, api: &ApiClients) -> Result<WalletLabels> {
     let records = api.dune.wallet_labels(&args.address).await?;
 
     let labels: Vec<String> = records.iter().map(|r| r.label.clone()).collect();
@@ -1197,10 +1198,7 @@ async fn build_labels_from_dune(
     })
 }
 
-async fn build_labels_from_zerion(
-    args: &LabelsArgs,
-    api: &ApiClients,
-) -> Result<WalletLabels> {
+async fn build_labels_from_zerion(args: &LabelsArgs, api: &ApiClients) -> Result<WalletLabels> {
     let records = api.zerion.wallet_labels(&args.address).await?;
 
     let labels: Vec<String> = records.iter().map(|r| r.label.clone()).collect();
@@ -1248,11 +1246,7 @@ async fn defi(
     ))
 }
 
-async fn build_defi(
-    args: &DefiArgs,
-    api: &ApiClients,
-    config: &AppConfig,
-) -> Result<WalletDefi> {
+async fn build_defi(args: &DefiArgs, api: &ApiClients, config: &AppConfig) -> Result<WalletDefi> {
     let chain_filter = config.chain_id_overridden.then_some(config.chain_id);
     let mut last_err: Option<ChainError> = None;
 
@@ -1276,12 +1270,14 @@ async fn build_defi(
         }
     }
 
-    Err(last_err.unwrap_or_else(|| ChainError::Config(
-        "DeFi positions requires DEBANK_API_KEY or ZERION_API_KEY. Run: \
+    Err(last_err.unwrap_or_else(|| {
+        ChainError::Config(
+            "DeFi positions requires DEBANK_API_KEY or ZERION_API_KEY. Run: \
          chainpilot config set debank_api_key <key> (preferred) or \
          chainpilot config set zerion_api_key <key>"
-            .to_string(),
-    )))
+                .to_string(),
+        )
+    }))
 }
 
 async fn build_defi_from_debank(
@@ -1293,9 +1289,9 @@ async fn build_defi_from_debank(
 
     let positions: Vec<DefiPosition> = raw
         .into_iter()
-        .filter(|p| chain_filter.is_none_or(|id| {
-            crate::api::debank_chain_to_id(&p.chain) == Some(id)
-        }))
+        .filter(|p| {
+            chain_filter.is_none_or(|id| crate::api::debank_chain_to_id(&p.chain) == Some(id))
+        })
         .filter(|p| p.value_usd.unwrap_or(0.0) >= args.min_usd)
         .map(|p| DefiPosition {
             protocol: p.protocol,
@@ -1315,12 +1311,7 @@ async fn build_defi_from_debank(
         })
         .collect();
 
-    let total_value_usd = Some(
-        positions
-            .iter()
-            .map(|p| p.value_usd.unwrap_or(0.0))
-            .sum(),
-    );
+    let total_value_usd = Some(positions.iter().map(|p| p.value_usd.unwrap_or(0.0)).sum());
 
     Ok(WalletDefi {
         wallet: args.address.clone(),
@@ -1359,10 +1350,7 @@ async fn build_defi_from_zerion(
                     .clone()
                     .or_else(|| p.display_name.clone())
                     .unwrap_or_else(|| "unknown".to_string()),
-                position_name: p
-                    .display_name
-                    .clone()
-                    .unwrap_or_else(|| p.name.clone()),
+                position_name: p.display_name.clone().unwrap_or_else(|| p.name.clone()),
                 chain: p.chain_slug,
                 value_usd: p.value_usd,
                 tokens,
@@ -1372,12 +1360,7 @@ async fn build_defi_from_zerion(
         })
         .collect();
 
-    let total_value_usd = Some(
-        positions
-            .iter()
-            .map(|p| p.value_usd.unwrap_or(0.0))
-            .sum(),
-    );
+    let total_value_usd = Some(positions.iter().map(|p| p.value_usd.unwrap_or(0.0)).sum());
 
     Ok(WalletDefi {
         wallet: args.address.clone(),
@@ -1400,7 +1383,11 @@ mod tests {
             name: symbol.to_string(),
             address: format!("0x{}", symbol),
             amount,
-            price_usd: if amount > 0.0 { Some(value / amount) } else { None },
+            price_usd: if amount > 0.0 {
+                Some(value / amount)
+            } else {
+                None
+            },
             value_usd: Some(value),
         }
     }
@@ -1442,10 +1429,7 @@ mod tests {
 
     #[test]
     fn top_holdings_skips_zero_value() {
-        let tokens = vec![
-            asset("Z", "eth", 1.0, 0.0),
-            asset("A", "eth", 1.0, 5.0),
-        ];
+        let tokens = vec![asset("Z", "eth", 1.0, 0.0), asset("A", "eth", 1.0, 5.0)];
         let holdings = build_top_holdings(&tokens, 5);
         assert_eq!(holdings.len(), 1);
         assert_eq!(holdings[0].symbol, "A");

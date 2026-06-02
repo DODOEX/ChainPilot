@@ -135,11 +135,7 @@ impl GoldrushClient {
         Ok(chains)
     }
 
-    pub async fn balances_v2(
-        &self,
-        chain_id: u64,
-        address: &str,
-    ) -> Result<GoldrushChainBalance> {
+    pub async fn balances_v2(&self, chain_id: u64, address: &str) -> Result<GoldrushChainBalance> {
         self.require_key()?;
         let url = format!(
             "{}/{}/address/{}/balances_v2/",
@@ -159,9 +155,9 @@ impl GoldrushClient {
             .await
             .map_err(ChainError::Http)?;
 
-        let data = resp.data.ok_or_else(|| ChainError::Config(
-            format!("Goldrush returned no data for chain {chain_id}"),
-        ))?;
+        let data = resp.data.ok_or_else(|| {
+            ChainError::Config(format!("Goldrush returned no data for chain {chain_id}"))
+        })?;
 
         let chain_name = data
             .chain_name

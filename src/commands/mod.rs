@@ -8,6 +8,7 @@ use crate::output::OutputMode;
 use crate::store::QuoteStore;
 
 pub mod config;
+pub mod protocol;
 pub mod risk;
 pub mod swap;
 pub mod token;
@@ -26,6 +27,9 @@ pub async fn dispatch(
         Commands::Swap(cmd) => swap::handle(cmd, &config, &store, &api_clients, output_mode).await,
         Commands::Token(cmd) => {
             token::handle(cmd, &config, &store, &api_clients, output_mode).await
+        }
+        Commands::Protocol(cmd) => {
+            protocol::handle(cmd, &config, &store, &api_clients, output_mode).await
         }
         Commands::Wallet(cmd) => {
             wallet::handle(cmd, &config, &store, &api_clients, output_mode).await

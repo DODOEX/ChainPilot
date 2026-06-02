@@ -1,4 +1,5 @@
 mod debank;
+mod defillama;
 mod dodo;
 mod dune;
 mod goldrush;
@@ -6,6 +7,7 @@ mod token_metadata;
 mod zerion;
 
 pub use debank::{debank_chain_to_id, DebankAssetRecord, DebankClient};
+pub use defillama::DefillamaClient;
 pub use dodo::DodoClient;
 pub use dune::DuneClient;
 pub use goldrush::{GoldrushAssetRecord, GoldrushChainBalance, GoldrushClient};
@@ -26,10 +28,7 @@ use std::time::Duration;
 /// callers build GETs with `.query(...)` so they qualify.
 ///
 /// `label` is used only for telemetry — keep it short, e.g. `"zerion.portfolio"`.
-pub async fn send_retrying(
-    req: reqwest::RequestBuilder,
-    label: &str,
-) -> Result<reqwest::Response> {
+pub async fn send_retrying(req: reqwest::RequestBuilder, label: &str) -> Result<reqwest::Response> {
     const MAX_ATTEMPTS: u32 = 3;
     let mut attempt: u32 = 1;
     loop {
@@ -63,7 +62,12 @@ pub async fn send_retrying(
 }
 
 fn retry_after_duration(resp: &reqwest::Response) -> Option<Duration> {
-    retry_after_from_str(resp.headers().get(reqwest::header::RETRY_AFTER)?.to_str().ok()?)
+    retry_after_from_str(
+        resp.headers()
+            .get(reqwest::header::RETRY_AFTER)?
+            .to_str()
+            .ok()?,
+    )
 }
 
 /// Parse a `Retry-After` header value (integer seconds form only — the
@@ -84,6 +88,7 @@ pub struct ApiClients {
     pub zerion: ZerionClient,
     pub goldrush: GoldrushClient,
     pub dune: DuneClient,
+    pub defillama: DefillamaClient,
 }
 
 impl ApiClients {
@@ -128,11 +133,8 @@ impl ApiClients {
                 &config.goldrush_api_url,
                 &config.goldrush_api_key,
             ),
-            dune: DuneClient::new(
-                client,
-                &config.dune_api_url,
-                &config.dune_api_key,
-            ),
+            dune: DuneClient::new(client.clone(), &config.dune_api_url, &config.dune_api_key),
+            defillama: DefillamaClient::new(client, crate::config::DEFAULT_DEFILLAMA_API_URL),
         })
     }
 }

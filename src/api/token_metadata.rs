@@ -1,12 +1,12 @@
 use std::time::Duration;
 
-use reqwest::Client;
-use serde::Deserialize;
 use crate::config::AppConfig;
 use crate::models::token::{
     TokenInfo, TokenPrice, TokenPriceSources, TokenSearchCandidate, TokenSearchResult,
     TokenSocialLinks,
 };
+use reqwest::Client;
+use serde::Deserialize;
 
 #[derive(Clone)]
 pub struct TokenMetadataClient {
@@ -427,8 +427,12 @@ impl TokenMetadataClient {
             set!(transfer_restricted, a.transfer_restricted);
             set!(mintable, a.mintable);
             set!(owner_privileged, a.owner_privileged);
-            if let Some(v) = a.tax_buy { set!(tax_buy, v); }
-            if let Some(v) = a.tax_sell { set!(tax_sell, v); }
+            if let Some(v) = a.tax_buy {
+                set!(tax_buy, v);
+            }
+            if let Some(v) = a.tax_sell {
+                set!(tax_sell, v);
+            }
             set!(risk_score, a.risk_score);
             set!(risk_level, a.risk_level);
         }
@@ -436,11 +440,7 @@ impl TokenMetadataClient {
         risk
     }
 
-    async fn fetch_goplus_risk(
-        &self,
-        chain_id: u64,
-        address: &str,
-    ) -> Option<GoPlusTokenSecurity> {
+    async fn fetch_goplus_risk(&self, chain_id: u64, address: &str) -> Option<GoPlusTokenSecurity> {
         let goplus_chain = goplus_chain_id(chain_id)?;
         let url = format!(
             "https://api.gopluslabs.io/api/v1/token_security/{}",
@@ -456,14 +456,24 @@ impl TokenMetadataClient {
             .ok()?;
         let status = resp.status();
         let body_text = resp.text().await.ok()?;
-        tracing::debug!("GoPlus risk API status={status}, body={}", if body_text.len() > 500 { &body_text[..500] } else { &body_text });
+        tracing::debug!(
+            "GoPlus risk API status={status}, body={}",
+            if body_text.len() > 500 {
+                &body_text[..500]
+            } else {
+                &body_text
+            }
+        );
         let data: GoPlusResponse = serde_json::from_str(&body_text).ok()?;
         if data.code != 1 {
             return None;
         }
         let result = data.result?;
         let addr_lower = address.to_lowercase();
-        result.get(&addr_lower).cloned().or_else(|| result.into_values().next())
+        result
+            .get(&addr_lower)
+            .cloned()
+            .or_else(|| result.into_values().next())
     }
 
     pub async fn search_symbol(&self, query: &str, chain_id: u64) -> TokenSearchResult {
@@ -580,7 +590,6 @@ impl TokenMetadataClient {
             .collect()
     }
 
-
     async fn fetch_coingecko(
         &self,
         platform: &str,
@@ -607,10 +616,7 @@ impl TokenMetadataClient {
         req.send().await?.error_for_status()?.json().await
     }
 
-    async fn fetch_coingecko_by_id(
-        &self,
-        coin_id: &str,
-    ) -> Result<CoinGeckoToken, reqwest::Error> {
+    async fn fetch_coingecko_by_id(&self, coin_id: &str) -> Result<CoinGeckoToken, reqwest::Error> {
         let url = format!("{}/coins/{}", self.coingecko_base_url, coin_id);
         let mut req = self
             .client
@@ -643,7 +649,6 @@ impl TokenMetadataClient {
             .json()
             .await
     }
-
 }
 
 fn apply_coingecko(patch: &mut TokenMetadataPatch, token: Option<CoinGeckoToken>) {
@@ -976,10 +981,18 @@ fn assess_goplus_risk(data: &GoPlusTokenSecurity) -> GoPlusRiskAssessment {
     let owner_privileged = data.owner_change_balance.as_deref() == Some("1");
     let trusted = data.trust_list.as_deref() == Some("1");
     let buy_tax = data.buy_tax.as_deref().and_then(|s| {
-        if s.is_empty() { Some(0.0) } else { s.parse::<f64>().ok() }
+        if s.is_empty() {
+            Some(0.0)
+        } else {
+            s.parse::<f64>().ok()
+        }
     });
     let sell_tax = data.sell_tax.as_deref().and_then(|s| {
-        if s.is_empty() { Some(0.0) } else { s.parse::<f64>().ok() }
+        if s.is_empty() {
+            Some(0.0)
+        } else {
+            s.parse::<f64>().ok()
+        }
     });
 
     // Trusted tokens (e.g. USDT, USDC) have their centralized-control
@@ -989,18 +1002,38 @@ fn assess_goplus_risk(data: &GoPlusTokenSecurity) -> GoPlusRiskAssessment {
 
     let mut score: f64 = 0.0;
     // Honeypot is always critical regardless of trust status
-    if honeypot { score += 100.0; }
+    if honeypot {
+        score += 100.0;
+    }
     // Centralized-control signals: discounted for trusted tokens
-    if blacklist { score += 30.0 * centralization_weight; }
-    if transfer_restricted { score += 20.0 * centralization_weight; }
-    if mintable { score += 15.0 * centralization_weight; }
-    if owner_privileged { score += 15.0 * centralization_weight; }
+    if blacklist {
+        score += 30.0 * centralization_weight;
+    }
+    if transfer_restricted {
+        score += 20.0 * centralization_weight;
+    }
+    if mintable {
+        score += 15.0 * centralization_weight;
+    }
+    if owner_privileged {
+        score += 15.0 * centralization_weight;
+    }
     // Tax signals apply at full weight regardless of trust
-    if let Some(t) = buy_tax { score += t.min(50.0); }
-    if let Some(t) = sell_tax { score += t.min(50.0); }
+    if let Some(t) = buy_tax {
+        score += t.min(50.0);
+    }
+    if let Some(t) = sell_tax {
+        score += t.min(50.0);
+    }
     score = score.min(100.0);
 
-    let level = if score >= 70.0 { "high" } else if score >= 30.0 { "medium" } else { "low" };
+    let level = if score >= 70.0 {
+        "high"
+    } else if score >= 30.0 {
+        "medium"
+    } else {
+        "low"
+    };
 
     GoPlusRiskAssessment {
         honeypot,

@@ -15,6 +15,7 @@ pub const DEFAULT_DEBANK_API_URL: &str = "https://pro-openapi.debank.com/v1";
 pub const DEFAULT_GOLDRUSH_API_URL: &str = "https://api.covalenthq.com/v1";
 pub const DEFAULT_ZERION_API_URL: &str = "https://api.zerion.io/v1";
 pub const DEFAULT_DUNE_API_URL: &str = "https://api.dune.com/api/v1";
+pub const DEFAULT_DEFILLAMA_API_URL: &str = "https://api.llama.fi";
 pub const DEFAULT_KEYSTORE_PASSWORD_ENV: &str = "KEYSTORE_PASSWORD";
 
 /// Compile-time default: set `DODO_API_KEY` at build time to bake a key into the binary.
@@ -113,19 +114,18 @@ impl AppConfig {
         let coingecko_api_key = std::env::var("COINGECKO_API_KEY").ok();
         let dexscreener_api_url = std::env::var("DEXSCREENER_API_URL")
             .unwrap_or_else(|_| DEFAULT_DEXSCREENER_API_URL.to_string());
-        let debank_api_url = std::env::var("DEBANK_API_URL")
-            .unwrap_or_else(|_| DEFAULT_DEBANK_API_URL.to_string());
+        let debank_api_url =
+            std::env::var("DEBANK_API_URL").unwrap_or_else(|_| DEFAULT_DEBANK_API_URL.to_string());
         let debank_api_key = std::env::var("DEBANK_API_KEY").unwrap_or_default();
         let goldrush_api_url = std::env::var("GOLDRUSH_API_URL")
             .unwrap_or_else(|_| DEFAULT_GOLDRUSH_API_URL.to_string());
         let goldrush_api_key = std::env::var("GOLDRUSH_API_KEY").unwrap_or_default();
-        let zerion_api_url = std::env::var("ZERION_API_URL")
-            .unwrap_or_else(|_| DEFAULT_ZERION_API_URL.to_string());
+        let zerion_api_url =
+            std::env::var("ZERION_API_URL").unwrap_or_else(|_| DEFAULT_ZERION_API_URL.to_string());
         let zerion_api_key = std::env::var("ZERION_API_KEY").unwrap_or_default();
-        let dune_api_url = std::env::var("DUNE_API_URL")
-            .unwrap_or_else(|_| DEFAULT_DUNE_API_URL.to_string());
+        let dune_api_url =
+            std::env::var("DUNE_API_URL").unwrap_or_else(|_| DEFAULT_DUNE_API_URL.to_string());
         let dune_api_key = std::env::var("DUNE_API_KEY").unwrap_or_default();
-
         Ok(Self {
             rpc_url,
             rpc_url_overridden,

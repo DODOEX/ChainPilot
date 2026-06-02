@@ -377,15 +377,18 @@ impl ZerionClient {
         ];
         query.push((
             "filter[positions]",
-            if only_simple { "only_simple" } else { "no_filter" }.to_string(),
+            if only_simple {
+                "only_simple"
+            } else {
+                "no_filter"
+            }
+            .to_string(),
         ));
         if let Some(chain_id) = chain_filter {
             // Translate the EVM chain id back to Zerion's slug so the API
             // does the filtering for us — fewer payload bytes to parse.
             let slug = id_to_zerion_chain(chain_id).ok_or_else(|| {
-                ChainError::Config(format!(
-                    "Zerion does not recognize chain id {chain_id}"
-                ))
+                ChainError::Config(format!("Zerion does not recognize chain id {chain_id}"))
             })?;
             query.push(("filter[chain_ids]", slug.to_string()));
         }
@@ -523,8 +526,10 @@ impl ZerionClient {
         let mut wallet_positions: Vec<&ZerionPositionRecord> = Vec::new();
         let mut protocols: std::collections::HashSet<String> = std::collections::HashSet::new();
         let mut chains: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut protocol_usd: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-        let mut position_types: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut protocol_usd: std::collections::HashMap<String, f64> =
+            std::collections::HashMap::new();
+        let mut position_types: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
 
         for p in &positions {
             chains.insert(p.chain_slug.clone());
@@ -564,7 +569,13 @@ impl ZerionClient {
         for (proto_key, label, display_name) in known_protocols {
             if protocols.contains(*proto_key) {
                 let usd = protocol_usd.get(*proto_key).copied().unwrap_or(0.0);
-                let score = if usd >= 100_000.0 { 0.95 } else if usd >= 10_000.0 { 0.85 } else { 0.7 };
+                let score = if usd >= 100_000.0 {
+                    0.95
+                } else if usd >= 10_000.0 {
+                    0.85
+                } else {
+                    0.7
+                };
                 labels.push(ZerionLabelRecord {
                     label: label.to_string(),
                     score: Some(score),
@@ -579,7 +590,11 @@ impl ZerionClient {
             labels.push(ZerionLabelRecord {
                 label: "defi-user".to_string(),
                 score: Some(0.9),
-                reason: Some(format!("{} DeFi positions across {} protocols", defi_positions.len(), protocols.len())),
+                reason: Some(format!(
+                    "{} DeFi positions across {} protocols",
+                    defi_positions.len(),
+                    protocols.len()
+                )),
             });
         } else if !defi_positions.is_empty() {
             labels.push(ZerionLabelRecord {
@@ -747,9 +762,8 @@ impl ZerionClient {
                         .unwrap_or_else(|| "unknown".to_string());
                     let val = t.value.unwrap_or(0.0);
                     let qty = t.quantity.as_ref().and_then(|q| {
-                        q.float.or_else(|| {
-                            q.numeric.as_deref().and_then(|s| s.parse::<f64>().ok())
-                        })
+                        q.float
+                            .or_else(|| q.numeric.as_deref().and_then(|s| s.parse::<f64>().ok()))
                     });
                     match t.direction.as_deref() {
                         Some("in") => {
@@ -820,9 +834,12 @@ fn map_position(item: PositionItem) -> Option<ZerionPositionRecord> {
     }
 
     let quantity = attrs.quantity?;
-    let amount = quantity
-        .float
-        .or_else(|| quantity.numeric.as_deref().and_then(|s| s.parse::<f64>().ok()))?;
+    let amount = quantity.float.or_else(|| {
+        quantity
+            .numeric
+            .as_deref()
+            .and_then(|s| s.parse::<f64>().ok())
+    })?;
     if amount <= 0.0 {
         return None;
     }
@@ -1000,9 +1017,8 @@ mod tests {
     /// add the chain id to the `unsupported` set.
     #[test]
     fn all_config_chains_have_zerion_mapping_or_are_documented_unsupported() {
-        let unsupported: std::collections::HashSet<u64> = [66u64, 1030, 98866, 11155111]
-            .into_iter()
-            .collect();
+        let unsupported: std::collections::HashSet<u64> =
+            [66u64, 1030, 98866, 11155111].into_iter().collect();
         for id in crate::config::chains::all_chain_ids() {
             if id_to_zerion_chain(id).is_some() {
                 continue;
