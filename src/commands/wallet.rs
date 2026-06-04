@@ -1129,7 +1129,7 @@ async fn build_labels(args: &LabelsArgs, api: &ApiClients) -> Result<WalletLabel
         match build_labels_from_dune(args, api).await {
             Ok(labels) => return Ok(labels),
             Err(e) => {
-                tracing::warn!("Dune labels lookup failed: {e}. Falling back to Zerion.");
+                tracing::warn!("Dune labels lookup failed: {e}.");
                 last_err = Some(e);
             }
         }

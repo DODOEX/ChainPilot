@@ -1,3 +1,4 @@
+use alloy::primitives::Address;
 use std::time::Duration;
 
 use reqwest::Client;
@@ -80,8 +81,11 @@ impl DuneClient {
     /// `labels.addresses`.
     pub async fn wallet_labels(&self, address: &str) -> Result<Vec<DuneLabelRecord>> {
         self.require_key()?;
+        let normalized = address
+            .parse::<Address>()
+            .map(|addr| addr.to_string().to_lowercase())
+            .map_err(|_| ChainError::InvalidAddress(address.to_string()))?;
 
-        let normalized = address.to_lowercase();
         let sql = format!(
             "SELECT DISTINCT blockchain, name AS label, label_type, source \
              FROM labels.addresses \
