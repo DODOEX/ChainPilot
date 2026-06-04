@@ -1115,11 +1115,11 @@ async fn labels(
 async fn build_labels(args: &LabelsArgs, api: &ApiClients) -> Result<WalletLabels> {
     let mut last_err: Option<ChainError> = None;
 
-    if api.debank.is_configured() {
-        match build_labels_from_debank(args, api).await {
+    if api.zerion.is_configured() {
+        match build_labels_from_zerion(args, api).await {
             Ok(labels) => return Ok(labels),
             Err(e) => {
-                tracing::warn!("Debank labels lookup failed: {e}. Falling back to Dune.");
+                tracing::warn!("Zerion labels lookup failed: {e}. Falling back to Dune.");
                 last_err = Some(e);
             }
         }
@@ -1135,46 +1135,14 @@ async fn build_labels(args: &LabelsArgs, api: &ApiClients) -> Result<WalletLabel
         }
     }
 
-    if api.zerion.is_configured() {
-        match build_labels_from_zerion(args, api).await {
-            Ok(labels) => return Ok(labels),
-            Err(e) => {
-                tracing::warn!("Zerion labels lookup failed: {e}.");
-                last_err = Some(e);
-            }
-        }
-    }
-
     Err(last_err.unwrap_or_else(|| {
         ChainError::Config(
-            "Wallet labels requires DEBANK_API_KEY, DUNE_API_KEY, or ZERION_API_KEY. Run: \
-         chainpilot config set debank_api_key <key> (preferred), \
-         chainpilot config set dune_api_key <key>, or \
-         chainpilot config set zerion_api_key <key>"
+            "Wallet labels requires ZERION_API_KEY or DUNE_API_KEY. Run: \
+         chainpilot config set zerion_api_key <key> (preferred), \
+         or chainpilot config set dune_api_key <key>"
                 .to_string(),
         )
     }))
-}
-
-async fn build_labels_from_debank(args: &LabelsArgs, api: &ApiClients) -> Result<WalletLabels> {
-    let records = api.debank.wallet_labels(&args.address).await?;
-
-    let labels: Vec<String> = records.iter().map(|r| r.label.clone()).collect();
-    let label_scores: Vec<LabelScore> = records
-        .into_iter()
-        .map(|r| LabelScore {
-            label: r.label,
-            score: r.score,
-            reason: r.reason,
-        })
-        .collect();
-
-    Ok(WalletLabels {
-        wallet: args.address.clone(),
-        labels,
-        label_scores,
-        source: "debank".to_string(),
-    })
 }
 
 async fn build_labels_from_dune(args: &LabelsArgs, api: &ApiClients) -> Result<WalletLabels> {

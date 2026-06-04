@@ -202,35 +202,6 @@ pub struct DebankHistoryRecord {
     pub success: Option<bool>,
 }
 
-// ── wallet labels ────────────────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize)]
-struct LabelListResp {
-    #[serde(default)]
-    labels: Vec<LabelItem>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LabelItem {
-    name: Option<String>,
-    #[serde(default)]
-    tags: Vec<LabelTag>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LabelTag {
-    name: Option<String>,
-    score: Option<f64>,
-    reason: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DebankLabelRecord {
-    pub label: String,
-    pub score: Option<f64>,
-    pub reason: Option<String>,
-}
-
 impl DebankClient {
     pub fn new(client: Client, base_url: &str, api_key: &str) -> Self {
         Self {
@@ -485,50 +456,6 @@ impl DebankClient {
             }
         }
         Ok(positions)
-    }
-
-    pub async fn wallet_labels(&self, address: &str) -> Result<Vec<DebankLabelRecord>> {
-        self.require_key()?;
-        let url = format!("{}/user/label", self.base_url);
-        let req = self
-            .client
-            .get(&url)
-            .header("AccessKey", &self.api_key)
-            .header("accept", "application/json")
-            .timeout(Duration::from_secs(10))
-            .query(&[("id", address)]);
-        let resp: LabelListResp = send_retrying(req, "debank.wallet_labels")
-            .await?
-            .error_for_status()
-            .map_err(map_http_err)?
-            .json()
-            .await
-            .map_err(map_http_err)?;
-
-        let mut records = Vec::new();
-        for item in resp.labels {
-            if let Some(label_name) = item.name {
-                if !label_name.is_empty() {
-                    records.push(DebankLabelRecord {
-                        label: label_name,
-                        score: None,
-                        reason: None,
-                    });
-                }
-            }
-            for tag in item.tags {
-                if let Some(tag_name) = tag.name {
-                    if !tag_name.is_empty() {
-                        records.push(DebankLabelRecord {
-                            label: tag_name,
-                            score: tag.score,
-                            reason: tag.reason,
-                        });
-                    }
-                }
-            }
-        }
-        Ok(records)
     }
 
     pub async fn all_history_list(

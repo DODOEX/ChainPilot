@@ -17,7 +17,7 @@ pub enum WalletAction {
     Pnl(PnlArgs),
     /// Wallet transaction history. Requires ZERION_API_KEY or DEBANK_API_KEY
     History(HistoryArgs),
-    /// Wallet labels and behavioral tags. Requires DEBANK_API_KEY, DUNE_API_KEY, or ZERION_API_KEY
+    /// Wallet labels and behavioral tags. Requires ZERION_API_KEY or DUNE_API_KEY
     Labels(LabelsArgs),
     /// DeFi positions across protocols (deposits, LPs, staking, borrows). Requires DEBANK_API_KEY or ZERION_API_KEY
     Defi(DefiArgs),
