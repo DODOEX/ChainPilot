@@ -1300,33 +1300,7 @@ async fn build_defi_from_zerion(
         .positions(&args.address, false, chain_filter)
         .await?;
 
-    let positions: Vec<DefiPosition> = positions
-        .into_iter()
-        .filter(|p| p.position_type != "wallet")
-        .filter(|p| p.value_usd.unwrap_or(0.0) >= args.min_usd)
-        .map(|p| {
-            let mut tokens = Vec::new();
-            if !p.symbol.is_empty() {
-                tokens.push(DefiPositionToken {
-                    symbol: p.symbol.clone(),
-                    amount: Some(p.amount),
-                });
-            }
-            DefiPosition {
-                protocol: p
-                    .protocol
-                    .clone()
-                    .or_else(|| p.display_name.clone())
-                    .unwrap_or_else(|| "unknown".to_string()),
-                position_name: p.display_name.clone().unwrap_or_else(|| p.name.clone()),
-                chain: p.chain_slug,
-                value_usd: p.value_usd,
-                tokens,
-                position_type: p.position_type,
-                site_url: p.protocol_url,
-            }
-        })
-        .collect();
+    let positions = build_zerion_defi_positions(positions, args.min_usd);
 
     let total_value_usd = Some(positions.iter().map(|p| p.value_usd.unwrap_or(0.0)).sum());
 
@@ -1336,6 +1310,111 @@ async fn build_defi_from_zerion(
         positions,
         source: "zerion".to_string(),
     })
+}
+
+fn build_zerion_defi_positions(
+    positions: Vec<ZerionPositionRecord>,
+    min_usd: f64,
+) -> Vec<DefiPosition> {
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct GroupedLp {
+        protocol: Option<String>,
+        position_name: Option<String>,
+        chain: Option<String>,
+        value_usd: f64,
+        tokens: Vec<DefiPositionToken>,
+        position_type: Option<String>,
+        site_url: Option<String>,
+    }
+
+    let mut grouped_lp: HashMap<String, GroupedLp> = HashMap::new();
+    let mut out = Vec::new();
+
+    for p in positions.into_iter().filter(|p| p.position_type != "wallet") {
+        if is_groupable_zerion_lp(&p) {
+            let key = p.group_id.clone().unwrap_or_default();
+            let entry = grouped_lp.entry(key).or_default();
+            if entry.protocol.is_none() {
+                entry.protocol = p.protocol.clone().or_else(|| p.display_name.clone());
+            }
+            if entry.position_name.is_none() {
+                entry.position_name = p.display_name.clone().or(Some(p.name.clone()));
+            }
+            if entry.chain.is_none() {
+                entry.chain = Some(p.chain_slug.clone());
+            }
+            entry.value_usd += p.value_usd.unwrap_or(0.0);
+            if !p.symbol.is_empty() {
+                entry.tokens.push(DefiPositionToken {
+                    symbol: p.symbol.clone(),
+                    amount: Some(p.amount),
+                });
+            }
+            if entry.position_type.is_none() {
+                entry.position_type = Some(p.position_type.clone());
+            }
+            if entry.site_url.is_none() {
+                entry.site_url = p.protocol_url.clone();
+            }
+            continue;
+        }
+
+        let value = p.value_usd.unwrap_or(0.0);
+        if value < min_usd {
+            continue;
+        }
+
+        let mut tokens = Vec::new();
+        if !p.symbol.is_empty() {
+            tokens.push(DefiPositionToken {
+                symbol: p.symbol.clone(),
+                amount: Some(p.amount),
+            });
+        }
+        out.push(DefiPosition {
+            protocol: p
+                .protocol
+                .clone()
+                .or_else(|| p.display_name.clone())
+                .unwrap_or_else(|| "unknown".to_string()),
+            position_name: p.display_name.clone().unwrap_or_else(|| p.name.clone()),
+            chain: p.chain_slug,
+            value_usd: p.value_usd,
+            tokens,
+            position_type: p.position_type,
+            site_url: p.protocol_url,
+        });
+    }
+
+    for lp in grouped_lp.into_values() {
+        if lp.value_usd < min_usd {
+            continue;
+        }
+        out.push(DefiPosition {
+            protocol: lp.protocol.unwrap_or_else(|| "unknown".to_string()),
+            position_name: lp.position_name.unwrap_or_else(|| "liquidity position".to_string()),
+            chain: lp.chain.unwrap_or_default(),
+            value_usd: Some(lp.value_usd),
+            tokens: lp.tokens,
+            position_type: lp.position_type.unwrap_or_else(|| "liquidity".to_string()),
+            site_url: lp.site_url,
+        });
+    }
+
+    out
+}
+
+fn is_groupable_zerion_lp(p: &ZerionPositionRecord) -> bool {
+    if p.group_id.as_deref().is_none_or(str::is_empty) {
+        return false;
+    }
+
+    matches!(
+        p.position_type.as_str(),
+        "liquidity" | "lp" | "liquidity_pool"
+    )
 }
 
 #[cfg(test)]
@@ -1438,6 +1517,7 @@ mod tests {
             amount: value.max(0.0),
             price_usd: Some(1.0),
             value_usd: Some(value),
+            group_id: None,
             position_type: position_type.to_string(),
             protocol: protocol.map(str::to_string),
             protocol_url: None,
@@ -1453,6 +1533,20 @@ mod tests {
     ) -> ZerionPositionRecord {
         let mut p = zerion_position(symbol, chain_slug, value, position_type, None);
         p.display_name = Some(display_name.to_string());
+        p
+    }
+
+    fn zerion_lp_position(
+        symbol: &str,
+        chain_slug: &str,
+        value: f64,
+        amount: f64,
+        group_id: &str,
+        protocol: Option<&str>,
+    ) -> ZerionPositionRecord {
+        let mut p = zerion_position(symbol, chain_slug, value, "liquidity", protocol);
+        p.amount = amount;
+        p.group_id = Some(group_id.to_string());
         p
     }
 
@@ -1506,6 +1600,42 @@ mod tests {
         assert!(protocols
             .iter()
             .any(|p| p.name == "aura-finance" && p.net_usd_value == Some(100.0)));
+    }
+
+    #[test]
+    fn build_zerion_defi_positions_groups_lp_legs_by_group_id() {
+        let positions = vec![
+            zerion_lp_position("USDC", "base", 120.0, 100.0, "pool-1", Some("uniswap-v3")),
+            zerion_lp_position("ETH", "base", 80.0, 0.05, "pool-1", Some("uniswap-v3")),
+            zerion_position("USDC", "base", 50.0, "deposit", Some("aave-v3")),
+        ];
+
+        let defi = build_zerion_defi_positions(positions, 1.0);
+        assert_eq!(defi.len(), 2);
+
+        let lp = defi
+            .iter()
+            .find(|p| p.position_type == "liquidity")
+            .expect("expected grouped liquidity position");
+        assert_eq!(lp.protocol, "uniswap-v3");
+        assert_eq!(lp.chain, "base");
+        assert_eq!(lp.value_usd, Some(200.0));
+        assert_eq!(lp.tokens.len(), 2);
+        assert!(lp.tokens.iter().any(|t| t.symbol == "USDC" && t.amount == Some(100.0)));
+        assert!(lp.tokens.iter().any(|t| t.symbol == "ETH" && t.amount == Some(0.05)));
+    }
+
+    #[test]
+    fn build_zerion_defi_positions_does_not_group_non_lp_positions() {
+        let mut p1 = zerion_position("USDC", "ethereum", 100.0, "deposit", Some("aave-v3"));
+        p1.group_id = Some("shared".to_string());
+        let mut p2 = zerion_position("DAI", "ethereum", 75.0, "borrow", Some("aave-v3"));
+        p2.group_id = Some("shared".to_string());
+
+        let defi = build_zerion_defi_positions(vec![p1, p2], 1.0);
+        assert_eq!(defi.len(), 2);
+        assert!(defi.iter().any(|p| p.position_type == "deposit" && p.value_usd == Some(100.0)));
+        assert!(defi.iter().any(|p| p.position_type == "borrow" && p.value_usd == Some(75.0)));
     }
 
     #[test]
