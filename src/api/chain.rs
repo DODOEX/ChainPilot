@@ -6,13 +6,14 @@ use crate::api::send_retrying;
 use crate::error::{ChainError, Result};
 use crate::models::chain::{
     ChainFlows, ChainFlowsSources, ChainInfo, ChainInfoSources, ChainProtocolEntry, ChainProtocols,
-    ChainProtocolsSources, ChainStablecoins, ChainStablecoinsSources, StablecoinType,
+    ChainProtocolsSources, ChainStablecoins, ChainStablecoinsSources, FlowEntry, StablecoinType,
 };
 
 #[derive(Clone)]
 pub struct ChainClient {
     client: Client,
     defillama_url: String,
+    stablecoins_url: String,
     coingecko_url: String,
     coingecko_key: Option<String>,
 }
@@ -27,6 +28,9 @@ struct DefiLlamaChain {
     tvl: Option<f64>,
     #[serde(rename = "chainId", deserialize_with = "deserialize_optional_u64_from_string_or_int")]
     chain_id: Option<u64>,
+    /// CoinGecko ID of the chain's native token, supplied by DefiLlama. Authoritative
+    /// and current across all chains (e.g. Polygon → "polygon-ecosystem-token").
+    gecko_id: Option<String>,
 }
 
 /// DefiLlama returns `chainId` as either a JSON number or a quoted string.
@@ -104,12 +108,16 @@ struct DefiLlamaProtocol {
 struct DefiLlamaStablecoin {
     name: String,
     symbol: String,
-    #[allow(dead_code)]
-    chain: Option<String>,
-    chains: Option<Vec<String>>,
-    circulating: Option<DefiLlamaStablecoinCirculating>,
-    #[allow(dead_code)]
-    peggedUSD: Option<f64>,
+    /// Per-chain circulating breakdown, keyed by DefiLlama chain name. Each entry
+    /// carries the current supply and the supply 24h ago, enabling flow math.
+    chainCirculating: Option<std::collections::HashMap<String, DefiLlamaChainCirculating>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(non_snake_case)]
+struct DefiLlamaChainCirculating {
+    current: Option<DefiLlamaStablecoinCirculating>,
+    circulatingPrevDay: Option<DefiLlamaStablecoinCirculating>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,12 +147,14 @@ impl ChainClient {
     pub fn new(
         client: Client,
         defillama_url: &str,
+        stablecoins_url: &str,
         coingecko_url: &str,
         coingecko_key: Option<String>,
     ) -> Self {
         Self {
             client,
             defillama_url: defillama_url.trim_end_matches('/').to_string(),
+            stablecoins_url: stablecoins_url.trim_end_matches('/').to_string(),
             coingecko_url: coingecko_url.trim_end_matches('/').to_string(),
             coingecko_key,
         }
@@ -157,17 +167,14 @@ impl ChainClient {
         let matched = chains.iter().find(|c| c.name == resolved).unwrap();
         let chain_id = matched.chain_id;
         let native_token = matched.token_symbol.clone();
+        let gecko_id = matched.gecko_id.clone();
         let tvl = matched.tvl;
         let sources_base = "defillama:chains".to_string();
 
-        // Fetch native token price, fees, and active users concurrently
-        let price_fut = async {
-            if let Some(ref token) = native_token {
-                self.fetch_native_price(&resolved, token).await
-            } else {
-                None
-            }
-        };
+        // Fetch native token price, fees, and active users concurrently.
+        // No native_token guard: DefiLlama omits the symbol for some chains
+        // (e.g. Base) whose native price is still resolvable via chain config.
+        let price_fut = self.fetch_native_price(&resolved, gecko_id.as_deref(), chain_id);
         let fees_fut = self.fetch_chain_fees(&resolved);
         let active_fut = self.fetch_chain_active_users(&resolved);
 
@@ -221,16 +228,60 @@ impl ChainClient {
         let chains = self.fetch_defillama_chains().await?;
         let resolved = resolve_chain(chain, &chains)?;
 
-        // Flow data is limited with public APIs - return structure with available data
+        // Stablecoin flows are the one fund-flow dimension available without a paid
+        // plan: DefiLlama exposes per-chain current vs 24h-ago circulating supply.
+        // Net mint/burn approximates net stablecoin flow on the chain.
+        // Bridge flows require the paid bridges API; CEX flows have no public source.
+        let stablecoins = self.fetch_defillama_stablecoins(&resolved).await?;
+
+        let mut stablecoin_flow: Vec<FlowEntry> = stablecoins
+            .iter()
+            .map(|s| FlowEntry {
+                name: s.name.clone(),
+                flow_usd: s.supply - s.prev_day_supply,
+            })
+            .filter(|e| e.flow_usd.abs() >= 1.0)
+            .collect();
+        stablecoin_flow.sort_by(|a, b| {
+            b.flow_usd
+                .abs()
+                .partial_cmp(&a.flow_usd.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        stablecoin_flow.truncate(15);
+
+        let has_data = !stablecoins.is_empty();
+        let inflow: f64 = stablecoins
+            .iter()
+            .map(|s| s.supply - s.prev_day_supply)
+            .filter(|d| *d > 0.0)
+            .sum();
+        let outflow: f64 = stablecoins
+            .iter()
+            .map(|s| s.supply - s.prev_day_supply)
+            .filter(|d| *d < 0.0)
+            .map(f64::abs)
+            .sum();
+        let net = inflow - outflow;
+
+        let sc_source = has_data.then(|| "defillama:stablecoins".to_string());
+
         Ok(ChainFlows {
             chain: resolved,
-            net_flow_usd: None,
-            inflow_usd: None,
-            outflow_usd: None,
+            net_flow_usd: has_data.then_some(net),
+            inflow_usd: has_data.then_some(inflow),
+            outflow_usd: has_data.then_some(outflow),
             bridge_flow: Vec::new(),
             cex_flow: Vec::new(),
-            stablecoin_flow: Vec::new(),
-            sources: ChainFlowsSources::default(),
+            stablecoin_flow,
+            sources: ChainFlowsSources {
+                net_flow_usd: sc_source.clone(),
+                inflow_usd: sc_source.clone(),
+                outflow_usd: sc_source.clone(),
+                bridge_flow: None,
+                cex_flow: None,
+                stablecoin_flow: sc_source,
+            },
         })
     }
 
@@ -241,9 +292,11 @@ impl ChainClient {
         let stablecoins = self.fetch_defillama_stablecoins(&resolved).await?;
 
         let total_supply: f64 = stablecoins.iter().map(|s| s.supply).sum();
+        let total_prev_day: f64 = stablecoins.iter().map(|s| s.prev_day_supply).sum();
 
-        let stablecoin_types: Vec<StablecoinType> = stablecoins
+        let mut stablecoin_types: Vec<StablecoinType> = stablecoins
             .iter()
+            .filter(|s| s.supply > 0.0)
             .map(|s| StablecoinType {
                 name: s.name.clone(),
                 supply: s.supply,
@@ -254,12 +307,17 @@ impl ChainClient {
                 },
             })
             .collect();
+        stablecoin_types.sort_by(|a, b| {
+            b.supply
+                .partial_cmp(&a.supply)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
-        let supply_source = if stablecoin_types.is_empty() {
-            None
-        } else {
-            Some("defillama:stablecoins".to_string())
-        };
+        let has_data = !stablecoins.is_empty();
+        let supply_source = has_data.then(|| "defillama:stablecoins".to_string());
+        // 24h net change in circulating supply (mints minus burns) on this chain.
+        let flow_24h = total_supply - total_prev_day;
+        let flow_source = has_data.then(|| "defillama:stablecoins".to_string());
 
         Ok(ChainStablecoins {
             chain: resolved,
@@ -269,11 +327,11 @@ impl ChainClient {
                 None
             },
             stablecoin_types,
-            stablecoin_flow_24h: None,
+            stablecoin_flow_24h: has_data.then_some(flow_24h),
             sources: ChainStablecoinsSources {
                 stablecoin_supply: supply_source.clone(),
                 stablecoin_types: supply_source,
-                stablecoin_flow_24h: None,
+                stablecoin_flow_24h: flow_source,
             },
         })
     }
@@ -282,7 +340,14 @@ impl ChainClient {
         let chains = self.fetch_defillama_chains().await?;
         let resolved = resolve_chain(chain, &chains)?;
 
-        let all_protocols = self.fetch_defillama_protocols().await?;
+        // Fetch the protocol list and the chain's per-protocol 24h revenue together.
+        let (all_protocols, revenue_by_name) = tokio::join!(
+            self.fetch_defillama_protocols(),
+            self.fetch_chain_protocol_revenue(&resolved)
+        );
+        let all_protocols = all_protocols?;
+        let revenue_by_name = revenue_by_name.unwrap_or_default();
+        let has_revenue = !revenue_by_name.is_empty();
 
         // Filter protocols by chain and sort by TVL descending
         let mut protocols: Vec<ChainProtocolEntry> = all_protocols
@@ -302,7 +367,7 @@ impl ChainClient {
                 ChainProtocolEntry {
                     name: p.name.clone(),
                     tvl: chain_tvl,
-                    revenue: None,
+                    revenue: revenue_by_name.get(&p.name).copied(),
                     users: None,
                     category: p.category.clone(),
                 }
@@ -320,15 +385,16 @@ impl ChainClient {
         let limit = limit as usize;
         protocols.truncate(limit);
 
+        let mut source = format!("defillama:protocols ({} of {})", limit.min(total), total);
+        if has_revenue {
+            source.push_str(", revenue: defillama:fees");
+        }
+
         Ok(ChainProtocols {
             chain: resolved,
             protocols,
             sources: ChainProtocolsSources {
-                protocols: Some(format!(
-                    "defillama:protocols ({} of {})",
-                    limit.min(total),
-                    total
-                )),
+                protocols: Some(source),
             },
         })
     }
@@ -373,11 +439,51 @@ impl ChainClient {
         })
     }
 
+    /// Fetch per-protocol 24h revenue for a chain from DefiLlama
+    /// `/overview/fees/{chain}` (dataType=dailyRevenue). Returns a name→revenue
+    /// map; an empty map on any failure so callers degrade gracefully.
+    async fn fetch_chain_protocol_revenue(
+        &self,
+        chain_name: &str,
+    ) -> Result<std::collections::HashMap<String, f64>> {
+        let url = format!("{}/overview/fees/{}", self.defillama_url, chain_name);
+        let req = self.client.get(&url).query(&[
+            ("excludeTotalDataChart", "true"),
+            ("excludeTotalDataChartBreakdown", "true"),
+            ("dataType", "dailyRevenue"),
+        ]);
+        let body = match send_retrying(req, "defillama.chain_revenue").await {
+            Ok(resp) => match resp.error_for_status() {
+                Ok(r) => r.text().await.map_err(ChainError::Http)?,
+                Err(_) => return Ok(std::collections::HashMap::new()),
+            },
+            Err(_) => return Ok(std::collections::HashMap::new()),
+        };
+
+        let value: Value = match serde_json::from_str(&body) {
+            Ok(v) => v,
+            Err(_) => return Ok(std::collections::HashMap::new()),
+        };
+
+        let mut map = std::collections::HashMap::new();
+        if let Some(protocols) = value.get("protocols").and_then(|p| p.as_array()) {
+            for p in protocols {
+                if let (Some(name), Some(rev)) = (
+                    p.get("name").and_then(|n| n.as_str()),
+                    p.get("total24h").and_then(|t| t.as_f64()),
+                ) {
+                    map.insert(name.to_string(), rev);
+                }
+            }
+        }
+        Ok(map)
+    }
+
     async fn fetch_defillama_stablecoins(
         &self,
         chain_name: &str,
     ) -> Result<Vec<SimpleStablecoin>> {
-        let url = format!("{}/stablecoins", self.defillama_url);
+        let url = format!("{}/stablecoins", self.stablecoins_url);
         let req = self.client.get(&url).query(&[("includePrices", "false")]);
         let body = send_retrying(req, "defillama.stablecoins")
             .await?
@@ -396,36 +502,65 @@ impl ChainClient {
 
         let assets = resp.peggedAssets.unwrap_or_default();
 
+        // The stablecoins endpoint keys `chainCirculating` differently from the
+        // canonical /chains name for some chains (e.g. "Binance" → "BSC").
+        let target = stablecoin_chain_name(chain_name);
+
         Ok(assets
             .into_iter()
             .filter_map(|asset| {
-                // Check if this stablecoin exists on the target chain
-                let chains = asset.chains.unwrap_or_default();
-                if !chains.iter().any(|c| c.eq_ignore_ascii_case(chain_name)) {
-                    return None;
-                }
+                // Pull this stablecoin's per-chain supply (current + 24h ago) for the
+                // target chain. Skip coins not present on the chain.
+                let per_chain = asset.chainCirculating.as_ref()?;
+                let entry = per_chain
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(target))
+                    .map(|(_, v)| v)?;
 
-                let supply = asset
-                    .circulating
+                let supply = entry
+                    .current
                     .as_ref()
                     .and_then(|c| c.peggedUSD)
                     .unwrap_or(0.0);
+                // Fall back to current supply when prev-day is missing so the 24h
+                // delta reads as zero rather than a spurious full-supply swing.
+                let prev_day_supply = entry
+                    .circulatingPrevDay
+                    .as_ref()
+                    .and_then(|c| c.peggedUSD)
+                    .unwrap_or(supply);
 
-                if supply <= 0.0 {
+                if supply <= 0.0 && prev_day_supply <= 0.0 {
                     return None;
                 }
 
                 Some(SimpleStablecoin {
                     name: format!("{} ({})", asset.name, asset.symbol),
                     supply,
+                    prev_day_supply,
                 })
             })
             .collect())
     }
 
-    async fn fetch_native_price(&self, chain_name: &str, _token_symbol: &str) -> Option<f64> {
-        // Map chain name to CoinGecko ID for the native token
-        let coingecko_id = chain_to_coingecko_id(chain_name)?;
+    async fn fetch_native_price(
+        &self,
+        chain_name: &str,
+        gecko_id: Option<&str>,
+        chain_id: Option<u64>,
+    ) -> Option<f64> {
+        // Resolve the native token's CoinGecko ID, most-authoritative first:
+        // 1. DefiLlama's per-chain `gecko_id` (current, covers all chains)
+        // 2. local chain config (keyed by chain ID)
+        // 3. name-based fallback map
+        let coingecko_id: &str = gecko_id
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                chain_id
+                    .and_then(crate::config::chain_config)
+                    .map(|c| c.native_token.coingecko_id)
+            })
+            .or_else(|| chain_to_coingecko_id(chain_name))?;
 
         let url = format!("{}/simple/price", self.coingecko_url);
         let mut req = self
@@ -509,6 +644,7 @@ impl ChainClient {
 struct SimpleStablecoin {
     name: String,
     supply: f64,
+    prev_day_supply: f64,
 }
 
 /// Resolve user input (chain ID, abbreviation, alias, or name) to the
@@ -555,13 +691,24 @@ fn resolve_chain(input: &str, chains: &[DefiLlamaChain]) -> Result<String> {
     )))
 }
 
+/// DefiLlama uses inconsistent chain names across endpoints. The canonical name
+/// from `/chains` may differ from the stablecoins endpoint's `chainCirculating`
+/// key. Translate a canonical name to the stablecoins-endpoint spelling.
+fn stablecoin_chain_name(canonical: &str) -> &str {
+    match canonical {
+        "Binance" => "BSC",
+        other => other,
+    }
+}
+
 /// Map common abbreviations and aliases to DefiLlama canonical chain names.
 fn chain_alias_to_name(alias: &str) -> Option<&'static str> {
     match alias {
         // Ethereum
         "eth" | "ethereum" => Some("Ethereum"),
         // BNB Chain
-        "bsc" | "bnb" | "binance" | "bnbchain" | "bnbsmartchain" => Some("BNB Chain"),
+        // DefiLlama's /chains endpoint names BSC "Binance" (not "BNB Chain").
+        "bsc" | "bnb" | "binance" | "bnbchain" | "bnbsmartchain" | "bnb chain" => Some("Binance"),
         // Polygon
         "matic" | "polygon" | "polygonpos" => Some("Polygon"),
         // Arbitrum
