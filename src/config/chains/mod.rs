@@ -3,6 +3,7 @@ mod aurora;
 mod avalanche;
 mod base;
 mod bsc;
+mod chain138;
 mod conflux;
 mod ethereum;
 mod linea;
@@ -60,6 +61,7 @@ static CHAINS: &[&ChainConfig] = &[
     &mantle::CONFIG,
     &aurora::CONFIG,
     &okchain::CONFIG,
+    &chain138::CONFIG,
     &conflux::CONFIG,
     &taiko::CONFIG,
     &plume::CONFIG,
