@@ -1,4 +1,5 @@
 pub mod config;
+pub mod protocol;
 pub mod risk;
 pub mod swap;
 pub mod token;
@@ -60,7 +61,9 @@ pub enum Commands {
     Swap(swap::SwapCmd),
     /// Token information (info, contract)
     Token(token::TokenCmd),
-    /// Wallet data (balance)
+    /// Protocol analytics (info, tvl, revenue, chains)
+    Protocol(protocol::ProtocolCmd),
+    /// Wallet data (balance, overview)
     Wallet(wallet::WalletCmd),
     /// Risk analysis (token, wallet, approval)
     Risk(risk::RiskCmd),

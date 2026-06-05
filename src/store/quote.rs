@@ -188,12 +188,12 @@ mod tests {
     /// Build a QuoteStore backed by a unique temp directory.
     fn temp_store() -> (QuoteStore, PathBuf) {
         let dir = std::env::temp_dir().join(format!("chain_test_{}", Uuid::new_v4()));
-        let (coingecko_api_url, coingecko_api_key, dexscreener_api_url) =
-            crate::config::test_metadata_config_fields();
+        let m = crate::config::test_metadata_config_fields();
         let config = AppConfig {
             rpc_url: "https://test.example.com".to_string(),
             rpc_url_overridden: false,
             chain_id: 1,
+            chain_id_overridden: false,
             private_key: None,
             keystore_path: None,
             keystore_password_file: None,
@@ -202,9 +202,17 @@ mod tests {
             dodo_api_url: String::new(),
             dodo_api_key: String::new(),
             dodo_project_id: String::new(),
-            coingecko_api_url,
-            coingecko_api_key,
-            dexscreener_api_url,
+            coingecko_api_url: m.coingecko_api_url,
+            coingecko_api_key: m.coingecko_api_key,
+            dexscreener_api_url: m.dexscreener_api_url,
+            debank_api_url: m.debank_api_url,
+            debank_api_key: m.debank_api_key,
+            goldrush_api_url: m.goldrush_api_url,
+            goldrush_api_key: m.goldrush_api_key,
+            zerion_api_url: m.zerion_api_url,
+            zerion_api_key: m.zerion_api_key,
+            dune_api_url: m.dune_api_url,
+            dune_api_key: m.dune_api_key,
             data_dir: dir.clone(),
         };
         let store = QuoteStore::new(&config).expect("create store");

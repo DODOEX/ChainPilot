@@ -320,11 +320,15 @@ impl TableRenderable for crate::models::token::TokenLiquidity {
             table.add_row(vec!["Top Pair DEX", &top.dex]);
             table.add_row(vec![
                 "Top Pair Liquidity (USD)",
-                &top.liquidity.map(format_usd).unwrap_or_else(|| "N/A".to_string()),
+                &top.liquidity
+                    .map(format_usd)
+                    .unwrap_or_else(|| "N/A".to_string()),
             ]);
             table.add_row(vec![
                 "Top Pair Volume 24h (USD)",
-                &top.volume_24h.map(format_usd).unwrap_or_else(|| "N/A".to_string()),
+                &top.volume_24h
+                    .map(format_usd)
+                    .unwrap_or_else(|| "N/A".to_string()),
             ]);
         }
         println!("{}", table);
@@ -338,15 +342,60 @@ impl TableRenderable for crate::models::token::TokenRisk {
         table.add_row(vec!["Address", &self.address, ""]);
         table.add_row(vec!["Symbol", &self.symbol, ""]);
         table.add_row(vec!["Chain ID", &self.chain_id.to_string(), ""]);
-        add_risk_row(&mut table, "Risk Level", self.risk_level.as_deref(), self.sources.risk_level.as_deref());
-        add_risk_row_score(&mut table, "Risk Score", self.risk_score, self.sources.risk_score.as_deref());
-        add_risk_row_bool(&mut table, "Honeypot", self.honeypot, self.sources.honeypot.as_deref());
-        add_risk_row_bool(&mut table, "Blacklist", self.blacklist, self.sources.blacklist.as_deref());
-        add_risk_row_bool(&mut table, "Transfer Restricted", self.transfer_restricted, self.sources.transfer_restricted.as_deref());
-        add_risk_row_bool(&mut table, "Mintable", self.mintable, self.sources.mintable.as_deref());
-        add_risk_row_bool(&mut table, "Owner Privileged", self.owner_privileged, self.sources.owner_privileged.as_deref());
-        add_risk_row_pct(&mut table, "Buy Tax", self.tax_buy, self.sources.tax_buy.as_deref());
-        add_risk_row_pct(&mut table, "Sell Tax", self.tax_sell, self.sources.tax_sell.as_deref());
+        add_risk_row(
+            &mut table,
+            "Risk Level",
+            self.risk_level.as_deref(),
+            self.sources.risk_level.as_deref(),
+        );
+        add_risk_row_score(
+            &mut table,
+            "Risk Score",
+            self.risk_score,
+            self.sources.risk_score.as_deref(),
+        );
+        add_risk_row_bool(
+            &mut table,
+            "Honeypot",
+            self.honeypot,
+            self.sources.honeypot.as_deref(),
+        );
+        add_risk_row_bool(
+            &mut table,
+            "Blacklist",
+            self.blacklist,
+            self.sources.blacklist.as_deref(),
+        );
+        add_risk_row_bool(
+            &mut table,
+            "Transfer Restricted",
+            self.transfer_restricted,
+            self.sources.transfer_restricted.as_deref(),
+        );
+        add_risk_row_bool(
+            &mut table,
+            "Mintable",
+            self.mintable,
+            self.sources.mintable.as_deref(),
+        );
+        add_risk_row_bool(
+            &mut table,
+            "Owner Privileged",
+            self.owner_privileged,
+            self.sources.owner_privileged.as_deref(),
+        );
+        add_risk_row_pct(
+            &mut table,
+            "Buy Tax",
+            self.tax_buy,
+            self.sources.tax_buy.as_deref(),
+        );
+        add_risk_row_pct(
+            &mut table,
+            "Sell Tax",
+            self.tax_sell,
+            self.sources.tax_sell.as_deref(),
+        );
         println!("{}", table);
     }
 }
@@ -507,20 +556,505 @@ impl TableRenderable for crate::models::token::TokenMintResult {
 
 impl TableRenderable for crate::models::wallet::WalletBalance {
     fn render_table(&self) {
-        let mut table = Table::new();
-        table.set_header(vec!["Field", "Value"]);
-        table.add_row(vec!["Address", &self.address]);
-        table.add_row(vec![
-            "ETH Balance",
-            &format!("{} ({})", self.eth_balance_display, self.eth_balance),
+        let mut header = Table::new();
+        header.set_header(vec!["Field", "Value"]);
+        header.add_row(vec!["Wallet", &self.wallet]);
+        header.add_row(vec![
+            "Total Balance (USD)",
+            &self
+                .total_balance_usd
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
         ]);
-        for tb in &self.token_balances {
+        println!("{}", header);
+
+        if !self.chain_allocation.is_empty() {
+            let mut chains = Table::new();
+            chains.set_header(vec!["Chain", "Balance (USD)", "Share"]);
+            for c in &self.chain_allocation {
+                chains.add_row(vec![
+                    &c.chain,
+                    &format_usd(c.balance_usd),
+                    &format!("{:.2}%", c.percentage),
+                ]);
+            }
+            println!("Chain allocation:");
+            println!("{}", chains);
+        }
+
+        if !self.assets.is_empty() {
+            let mut assets = Table::new();
+            assets.set_header(vec![
+                "Chain",
+                "Symbol",
+                "Amount",
+                "Price (USD)",
+                "Value (USD)",
+            ]);
+            for a in &self.assets {
+                assets.add_row(vec![
+                    &a.chain,
+                    &a.symbol,
+                    &format!("{}", a.amount),
+                    &a.price_usd
+                        .map(format_usd)
+                        .unwrap_or_else(|| "N/A".to_string()),
+                    &a.value_usd
+                        .map(format_usd)
+                        .unwrap_or_else(|| "N/A".to_string()),
+                ]);
+            }
+            println!("Assets:");
+            println!("{}", assets);
+        }
+    }
+}
+
+impl TableRenderable for crate::models::wallet::WalletOverview {
+    fn render_table(&self) {
+        let mut header = Table::new();
+        header.set_header(vec!["Field", "Value"]);
+        header.add_row(vec!["Wallet", &self.wallet]);
+        header.add_row(vec![
+            "Total Balance (USD)",
+            &self
+                .total_balance_usd
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        println!("{}", header);
+
+        if !self.chain_allocation.is_empty() {
+            let mut t = Table::new();
+            t.set_header(vec!["Chain", "Balance (USD)", "Share"]);
+            for c in &self.chain_allocation {
+                t.add_row(vec![
+                    &c.chain,
+                    &format_usd(c.balance_usd),
+                    &format!("{:.2}%", c.percentage),
+                ]);
+            }
+            println!("Chain allocation:");
+            println!("{}", t);
+        }
+
+        if !self.token_allocation.is_empty() {
+            let mut t = Table::new();
+            t.set_header(vec!["Symbol", "Name", "Balance (USD)", "Share"]);
+            for a in &self.token_allocation {
+                t.add_row(vec![
+                    &a.symbol,
+                    &a.name,
+                    &format_usd(a.balance_usd),
+                    &format!("{:.2}%", a.percentage),
+                ]);
+            }
+            println!("Token allocation:");
+            println!("{}", t);
+        }
+
+        if !self.top_holdings.is_empty() {
+            let mut t = Table::new();
+            t.set_header(vec!["Symbol", "Chain", "Amount", "Value (USD)"]);
+            for h in &self.top_holdings {
+                t.add_row(vec![
+                    &h.symbol,
+                    &h.chain,
+                    &format!("{}", h.amount),
+                    &format_usd(h.value_usd),
+                ]);
+            }
+            println!("Top holdings:");
+            println!("{}", t);
+        }
+
+        if !self.active_protocols.is_empty() {
+            let mut t = Table::new();
+            t.set_header(vec!["Protocol", "Chain", "Net (USD)", "Site"]);
+            for p in &self.active_protocols {
+                t.add_row(vec![
+                    &p.name,
+                    &p.chain,
+                    &p.net_usd_value
+                        .map(format_usd)
+                        .unwrap_or_else(|| "N/A".to_string()),
+                    p.site_url.as_deref().unwrap_or(""),
+                ]);
+            }
+            println!("Active protocols:");
+            println!("{}", t);
+        }
+    }
+}
+
+impl TableRenderable for crate::models::wallet::WalletPnl {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Metric", "Value"]);
+        table.add_row(vec!["Wallet", &self.wallet]);
+        table.add_row(vec![
+            "Realized PnL",
+            &self
+                .realized_pnl
+                .map(format_pnl)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "Unrealized PnL",
+            &self
+                .unrealized_pnl
+                .map(format_pnl)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "Total PnL",
+            &self
+                .total_pnl
+                .map(format_pnl)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "ROI",
+            &self
+                .roi
+                .map(|v| format!("{:+.2}%", v))
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "Win Rate",
+            &self
+                .win_rate
+                .map(|v| format!("{:.1}%", v))
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "Total Invested",
+            &self
+                .total_invested
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec![
+            "Total Fees",
+            &self
+                .total_fee
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        table.add_row(vec!["Source", &self.source]);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::wallet::WalletHistory {
+    fn render_table(&self) {
+        if self.transactions.is_empty() {
+            println!("No transactions found for {}", self.wallet);
+            return;
+        }
+        let mut table = Table::new();
+        table.set_header(vec![
+            "Time",
+            "Action",
+            "In",
+            "Amount",
+            "Out",
+            "Value (USD)",
+            "Success",
+            "TX Hash",
+        ]);
+        for tx in &self.transactions {
+            let short_hash = if tx.tx_hash.len() > 18 {
+                format!("{}…", &tx.tx_hash[..18])
+            } else {
+                tx.tx_hash.clone()
+            };
             table.add_row(vec![
-                &format!("{} Balance", tb.symbol),
-                &format!("{} ({})", tb.balance_display, tb.balance),
+                &tx.time,
+                &tx.action,
+                tx.token_in.as_deref().unwrap_or("-"),
+                &tx.amount
+                    .map(|v| format!("{:.6}", v))
+                    .unwrap_or_else(|| "-".to_string()),
+                tx.token_out.as_deref().unwrap_or("-"),
+                &tx.value_usd
+                    .map(format_usd)
+                    .unwrap_or_else(|| "-".to_string()),
+                &tx.success
+                    .map(|s| if s { "Yes" } else { "No" }.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                &short_hash,
+            ]);
+        }
+        println!("Wallet: {} (source: {})", self.wallet, self.source);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::wallet::WalletLabels {
+    fn render_table(&self) {
+        println!("Wallet: {} (source: {})", self.wallet, self.source);
+
+        if self.labels.is_empty() {
+            println!("No labels found.");
+            return;
+        }
+
+        println!("Labels: {}", self.labels.join(", "));
+
+        if !self.label_scores.is_empty() {
+            let mut table = Table::new();
+            table.set_header(vec!["Label", "Score", "Reason"]);
+            for ls in &self.label_scores {
+                table.add_row(vec![
+                    &ls.label,
+                    &ls.score
+                        .map(|s| format!("{:.2}", s))
+                        .unwrap_or_else(|| "-".to_string()),
+                    ls.reason.as_deref().unwrap_or("-"),
+                ]);
+            }
+            println!("{}", table);
+        }
+    }
+}
+
+impl TableRenderable for crate::models::wallet::WalletDefi {
+    fn render_table(&self) {
+        let mut header = Table::new();
+        header.set_header(vec!["Field", "Value"]);
+        header.add_row(vec!["Wallet", &self.wallet]);
+        header.add_row(vec![
+            "Total DeFi Value (USD)",
+            &self
+                .total_value_usd
+                .map(format_usd)
+                .unwrap_or_else(|| "N/A".to_string()),
+        ]);
+        header.add_row(vec!["Positions", &self.positions.len().to_string()]);
+        header.add_row(vec!["Source", &self.source]);
+        println!("{}", header);
+
+        if self.positions.is_empty() {
+            println!("No DeFi positions found.");
+            return;
+        }
+
+        let mut table = Table::new();
+        table.set_header(vec![
+            "Protocol",
+            "Position",
+            "Chain",
+            "Type",
+            "Value (USD)",
+            "Tokens",
+        ]);
+        for p in &self.positions {
+            let token_str = if p.tokens.is_empty() {
+                "-".to_string()
+            } else {
+                p.tokens
+                    .iter()
+                    .map(|t| {
+                        if let Some(amt) = t.amount {
+                            format!("{} {:.4}", t.symbol, amt)
+                        } else {
+                            t.symbol.clone()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            table.add_row(vec![
+                &p.protocol,
+                &p.position_name,
+                &p.chain,
+                &p.position_type,
+                &p.value_usd
+                    .map(format_usd)
+                    .unwrap_or_else(|| "-".to_string()),
+                &token_str,
             ]);
         }
         println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::protocol::ProtocolInfo {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value", "Source"]);
+        table.add_row(vec![
+            "Name",
+            &self.name,
+            self.sources.name.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "Category",
+            self.category.as_deref().unwrap_or("N/A"),
+            self.sources.category.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "Chain",
+            self.chain.as_deref().unwrap_or("N/A"),
+            self.sources.chain.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "Website",
+            self.website.as_deref().unwrap_or("N/A"),
+            self.sources.website.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "Description",
+            self.description.as_deref().unwrap_or("N/A"),
+            self.sources.description.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "TVL (USD)",
+            &format_optional_usd(self.tvl),
+            self.sources.tvl.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "Revenue 24h (USD)",
+            &format_optional_usd(self.revenue),
+            self.sources.revenue.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "Fees 24h (USD)",
+            &format_optional_usd(self.fee),
+            self.sources.fee.as_deref().unwrap_or(""),
+        ]);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::protocol::ProtocolTvl {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value", "Source"]);
+        table.add_row(vec!["Protocol", &self.protocol, ""]);
+        table.add_row(vec![
+            "Current TVL (USD)",
+            &format_optional_usd(self.current_tvl),
+            self.sources.current_tvl.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "TVL Change 24h",
+            &format_optional_pct(self.tvl_change_24h),
+            self.sources.tvl_change_24h.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "TVL Change 7d",
+            &format_optional_pct(self.tvl_change_7d),
+            self.sources.tvl_change_7d.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "TVL Change 30d",
+            &format_optional_pct(self.tvl_change_30d),
+            self.sources.tvl_change_30d.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "History Total",
+            &self.tvl_history_total.to_string(),
+            "",
+        ]);
+        table.add_row(vec![
+            "History Limit",
+            &self.tvl_history_limit.to_string(),
+            "",
+        ]);
+        table.add_row(vec![
+            "History Offset",
+            &self.tvl_history_offset.to_string(),
+            "",
+        ]);
+        table.add_row(vec![
+            "History Returned",
+            &self.tvl_history.len().to_string(),
+            self.sources.tvl_history.as_deref().unwrap_or(""),
+        ]);
+        println!("{}", table);
+
+        if !self.tvl_history.is_empty() {
+            let mut history = Table::new();
+            history.set_header(vec!["Date", "TVL (USD)"]);
+            for point in &self.tvl_history {
+                history.add_row(vec![&point.date.to_string(), &format_usd(point.tvl)]);
+            }
+            println!("TVL history page:");
+            println!("{}", history);
+        }
+    }
+}
+
+impl TableRenderable for crate::models::protocol::ProtocolRevenue {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value", "Source"]);
+        table.add_row(vec!["Protocol", &self.protocol, ""]);
+        table.add_row(vec![
+            "Revenue 24h (USD)",
+            &format_optional_usd(self.revenue_24h),
+            self.sources.revenue_24h.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "Revenue 7d (USD)",
+            &format_optional_usd(self.revenue_7d),
+            self.sources.revenue_7d.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "Revenue 30d (USD)",
+            &format_optional_usd(self.revenue_30d),
+            self.sources.revenue_30d.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "Fees 24h (USD)",
+            &format_optional_usd(self.fees_24h),
+            self.sources.fees_24h.as_deref().unwrap_or(""),
+        ]);
+        table.add_row(vec![
+            "Fees 7d (USD)",
+            &format_optional_usd(self.fees_7d),
+            self.sources.fees_7d.as_deref().unwrap_or(""),
+        ]);
+        println!("{}", table);
+    }
+}
+
+impl TableRenderable for crate::models::protocol::ProtocolChains {
+    fn render_table(&self) {
+        println!("Protocol: {}", self.protocol);
+        if self.chains.is_empty() {
+            println!("No chain distribution found.");
+            return;
+        }
+
+        let mut table = Table::new();
+        table.set_header(vec![
+            "Chain",
+            "TVL (USD)",
+            "TVL Source",
+            "Revenue 24h (USD)",
+            "Revenue Source",
+        ]);
+        for chain in &self.chains {
+            table.add_row(vec![
+                &chain.chain,
+                &format_optional_usd(chain.tvl),
+                chain.sources.tvl.as_deref().unwrap_or(""),
+                &format_optional_usd(chain.revenue),
+                chain.sources.revenue.as_deref().unwrap_or(""),
+            ]);
+        }
+        println!("{}", table);
+    }
+}
+
+fn format_pnl(value: f64) -> String {
+    if value >= 0.0 {
+        format!("+{:.2}", value)
+    } else {
+        format!("{:.2}", value)
     }
 }
 
@@ -558,10 +1092,7 @@ impl TableRenderable for crate::models::config::ConfigEntry {
         let mut table = Table::new();
         table.set_header(vec!["Field", "Value"]);
         table.add_row(vec!["Key", &self.key]);
-        let display_value = self
-            .value
-            .as_deref()
-            .unwrap_or("(not set)");
+        let display_value = self.value.as_deref().unwrap_or("(not set)");
         table.add_row(vec!["Value", display_value]);
         if self.masked {
             table.add_row(vec!["Note", "Sensitive value, partially masked"]);
@@ -575,16 +1106,9 @@ impl TableRenderable for Vec<crate::models::config::ConfigEntry> {
         let mut table = Table::new();
         table.set_header(vec!["Key", "Value", "Sensitive"]);
         for entry in self {
-            let display_value = entry
-                .value
-                .as_deref()
-                .unwrap_or("(not set)");
+            let display_value = entry.value.as_deref().unwrap_or("(not set)");
             let sensitive = if entry.masked { "Yes" } else { "" };
-            table.add_row(vec![
-                entry.key.as_str(),
-                display_value,
-                sensitive,
-            ]);
+            table.add_row(vec![entry.key.as_str(), display_value, sensitive]);
         }
         println!("{}", table);
     }
@@ -640,8 +1164,19 @@ fn format_usd(value: f64) -> String {
     if value.abs() >= 1.0 {
         format!("{:.2}", value)
     } else {
-        format!("{:.8}", value).trim_end_matches('0').to_string()
+        format!("{:.8}", value)
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
     }
+}
+
+fn format_optional_usd(value: Option<f64>) -> String {
+    value.map(format_usd).unwrap_or_else(|| "N/A".to_string())
+}
+
+fn format_optional_pct(value: Option<f64>) -> String {
+    value.map(format_pct).unwrap_or_else(|| "N/A".to_string())
 }
 
 fn format_social_links(links: &crate::models::token::TokenSocialLinks) -> String {

@@ -68,7 +68,7 @@ DODO_PROJECT_ID=your-id
 
 ## Configuration
 
-Supported environment variables are intentionally limited. Runtime config is read only from `PRIVATE_KEY`, `KEYSTORE_PATH`, `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`, `WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`, and `DODO_API_URL`. CLI flags still override where available.
+Supported environment variables are intentionally limited. Runtime config is read only from `PRIVATE_KEY`, `KEYSTORE_PATH`, `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`, `WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`, `DODO_API_URL`, `COINGECKO_API_KEY`, `COINGECKO_API_URL`, `DEXSCREENER_API_URL`, `DEBANK_API_KEY`, `DEBANK_API_URL`, `ZERION_API_KEY`, `ZERION_API_URL`, `GOLDRUSH_API_KEY`, and `GOLDRUSH_API_URL`. CLI flags still override where available.
 
 | Variable               | CLI flag              | Default                        | Description                                    |
 |------------------------|-----------------------|--------------------------------|------------------------------------------------|
@@ -83,6 +83,9 @@ Supported environment variables are intentionally limited. Runtime config is rea
 | `DODO_API_KEY`         | —                     | Compiled-in default            | DODO routing API key                           |
 | `DODO_PROJECT_ID`      | —                     | Compiled-in default            | DODO project ID for token list lookup          |
 | `DODO_API_URL`         | —                     | DODO production endpoint       | Override routing API URL                       |
+| `DEBANK_API_KEY`       | —                     | —                              | Debank Pro OpenAPI key (primary wallet source) |
+| `ZERION_API_KEY`       | —                     | —                              | Zerion API key (second-tier wallet source)     |
+| `GOLDRUSH_API_KEY`     | —                     | —                              | Goldrush / Covalent API key (third-tier wallet source) |
 
 Global flags (`--json`, `--quiet`, `--private-key`, `--keystore-path`, `--password-file`, `--password-env`, `--wallet-address`, `--rpc-url`, `--chain-id`) apply to every subcommand and must appear before the subcommand name:
 
@@ -313,14 +316,43 @@ chainpilot --chain-id 11155111 token renounce-ownership \
 
 ### Wallet
 
-```bash
-# Native and ERC-20 balances
-chainpilot wallet balance 0xYourAddress
-chainpilot --chain-id 56 wallet balance 0xYourAddress
+`wallet` commands query a wallet aggregator for cross-chain balance and
+portfolio data. ChainPilot tries data sources in this order: **Debank →
+Zerion → Goldrush → on-chain RPC**. The first source that is configured and
+responds is used; the `sources` field in `--json` output records which
+provider supplied each value.
 
-# Check balances for specific tokens only
-chainpilot wallet balance 0xYourAddress --tokens 0xToken1,0xToken2
+Configure any of the aggregator API keys with `chainpilot config set`:
+
+```bash
+chainpilot config set debank_api_key <KEY>     # primary (recommended)
+chainpilot config set zerion_api_key <KEY>     # second-tier
+chainpilot config set goldrush_api_key <KEY>   # third-tier
 ```
+
+Without any aggregator key, `wallet balance` falls back to a single-chain
+on-chain RPC read (native token amount only — no USD pricing). `wallet
+overview` errors out because it requires an aggregator.
+
+```bash
+# Cross-chain balance (assets, chain_allocation, total USD)
+chainpilot wallet balance 0xYourAddress
+
+# Scope every field to one chain
+chainpilot --chain-id 8453 wallet balance 0xYourAddress
+
+# Hide dust below $5 USD
+chainpilot wallet balance 0xYourAddress --min-usd 5
+
+# Portfolio overview (chain/token allocation, active protocols, top holdings)
+chainpilot wallet overview 0xYourAddress
+chainpilot wallet overview 0xYourAddress --top 10
+```
+
+`--chain-id <N>` scopes **every** field of the response — assets,
+`chain_allocation`, `total_balance_usd`, `token_allocation`,
+`top_holdings`, `active_protocols` — to that one chain. Without
+`--chain-id`, the response aggregates across every chain the wallet uses.
 
 ### Risk
 

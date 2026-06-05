@@ -11,6 +11,11 @@ const FALLBACK_RPC_URL: &str = "https://ethereum-rpc.publicnode.com";
 pub const DEFAULT_DODO_API_URL: &str = "https://api.dodoex.io/route-service/v2/widget/getdodoroute";
 pub const DEFAULT_COINGECKO_API_URL: &str = "https://api.coingecko.com/api/v3";
 pub const DEFAULT_DEXSCREENER_API_URL: &str = "https://api.dexscreener.com/latest/dex";
+pub const DEFAULT_DEBANK_API_URL: &str = "https://pro-openapi.debank.com/v1";
+pub const DEFAULT_GOLDRUSH_API_URL: &str = "https://api.covalenthq.com/v1";
+pub const DEFAULT_ZERION_API_URL: &str = "https://api.zerion.io/v1";
+pub const DEFAULT_DUNE_API_URL: &str = "https://api.dune.com/api/v1";
+pub const DEFAULT_DEFILLAMA_API_URL: &str = "https://api.llama.fi";
 pub const DEFAULT_KEYSTORE_PASSWORD_ENV: &str = "KEYSTORE_PASSWORD";
 
 /// Compile-time default: set `DODO_API_KEY` at build time to bake a key into the binary.
@@ -35,6 +40,7 @@ pub struct AppConfig {
     pub rpc_url: String,
     pub rpc_url_overridden: bool,
     pub chain_id: u64,
+    pub chain_id_overridden: bool,
     pub private_key: Option<String>,
     pub keystore_path: Option<String>,
     pub keystore_password_file: Option<String>,
@@ -48,15 +54,29 @@ pub struct AppConfig {
     pub coingecko_api_url: String,
     pub coingecko_api_key: Option<String>,
     pub dexscreener_api_url: String,
+    pub debank_api_url: String,
+    pub debank_api_key: String,
+    pub goldrush_api_url: String,
+    pub goldrush_api_key: String,
+    pub zerion_api_url: String,
+    pub zerion_api_key: String,
+    pub dune_api_url: String,
+    pub dune_api_key: String,
     pub data_dir: PathBuf,
 }
 
 impl AppConfig {
     pub fn load() -> Result<Self> {
-        let chain_id: u64 = std::env::var("CHAIN_ID")
-            .unwrap_or_else(|_| DEFAULT_CHAIN_ID.to_string())
-            .parse()
+        let chain_id_raw = std::env::var("CHAIN_ID").ok();
+        let chain_id: u64 = chain_id_raw
+            .as_deref()
+            .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_CHAIN_ID);
+        // Treat env var as explicit only when it parses to a real id;
+        // a garbage value is the same as "not set" in our precedence model.
+        let chain_id_overridden = chain_id_raw
+            .as_deref()
+            .is_some_and(|s| s.parse::<u64>().is_ok());
 
         let rpc_url_overridden = false;
         let rpc_url = {
@@ -94,11 +114,23 @@ impl AppConfig {
         let coingecko_api_key = std::env::var("COINGECKO_API_KEY").ok();
         let dexscreener_api_url = std::env::var("DEXSCREENER_API_URL")
             .unwrap_or_else(|_| DEFAULT_DEXSCREENER_API_URL.to_string());
-
+        let debank_api_url =
+            std::env::var("DEBANK_API_URL").unwrap_or_else(|_| DEFAULT_DEBANK_API_URL.to_string());
+        let debank_api_key = std::env::var("DEBANK_API_KEY").unwrap_or_default();
+        let goldrush_api_url = std::env::var("GOLDRUSH_API_URL")
+            .unwrap_or_else(|_| DEFAULT_GOLDRUSH_API_URL.to_string());
+        let goldrush_api_key = std::env::var("GOLDRUSH_API_KEY").unwrap_or_default();
+        let zerion_api_url =
+            std::env::var("ZERION_API_URL").unwrap_or_else(|_| DEFAULT_ZERION_API_URL.to_string());
+        let zerion_api_key = std::env::var("ZERION_API_KEY").unwrap_or_default();
+        let dune_api_url =
+            std::env::var("DUNE_API_URL").unwrap_or_else(|_| DEFAULT_DUNE_API_URL.to_string());
+        let dune_api_key = std::env::var("DUNE_API_KEY").unwrap_or_default();
         Ok(Self {
             rpc_url,
             rpc_url_overridden,
             chain_id,
+            chain_id_overridden,
             private_key,
             keystore_path,
             keystore_password_file,
@@ -110,6 +142,14 @@ impl AppConfig {
             coingecko_api_url,
             coingecko_api_key,
             dexscreener_api_url,
+            debank_api_url,
+            debank_api_key,
+            goldrush_api_url,
+            goldrush_api_key,
+            zerion_api_url,
+            zerion_api_key,
+            dune_api_url,
+            dune_api_key,
             data_dir,
         })
     }
@@ -139,11 +179,13 @@ impl AppConfig {
     }
 
     /// Update the active chain while preserving explicit RPC overrides.
+    /// Marks the chain id as explicitly set by the caller.
     pub fn set_chain_id(&mut self, chain_id: u64) {
         if !self.rpc_url_overridden {
             self.rpc_url = self.rpc_url_for_chain(chain_id);
         }
         self.chain_id = chain_id;
+        self.chain_id_overridden = true;
     }
 
     pub fn quotes_dir(&self) -> PathBuf {
@@ -168,12 +210,35 @@ impl AppConfig {
 }
 
 #[cfg(test)]
-pub fn test_metadata_config_fields() -> (String, Option<String>, String) {
-    (
-        DEFAULT_COINGECKO_API_URL.to_string(),
-        None,
-        DEFAULT_DEXSCREENER_API_URL.to_string(),
-    )
+pub fn test_metadata_config_fields() -> TestMetadataConfigFields {
+    TestMetadataConfigFields {
+        coingecko_api_url: DEFAULT_COINGECKO_API_URL.to_string(),
+        coingecko_api_key: None,
+        dexscreener_api_url: DEFAULT_DEXSCREENER_API_URL.to_string(),
+        debank_api_url: DEFAULT_DEBANK_API_URL.to_string(),
+        debank_api_key: String::new(),
+        goldrush_api_url: DEFAULT_GOLDRUSH_API_URL.to_string(),
+        goldrush_api_key: String::new(),
+        zerion_api_url: DEFAULT_ZERION_API_URL.to_string(),
+        zerion_api_key: String::new(),
+        dune_api_url: DEFAULT_DUNE_API_URL.to_string(),
+        dune_api_key: String::new(),
+    }
+}
+
+#[cfg(test)]
+pub struct TestMetadataConfigFields {
+    pub coingecko_api_url: String,
+    pub coingecko_api_key: Option<String>,
+    pub dexscreener_api_url: String,
+    pub debank_api_url: String,
+    pub debank_api_key: String,
+    pub goldrush_api_url: String,
+    pub goldrush_api_key: String,
+    pub zerion_api_url: String,
+    pub zerion_api_key: String,
+    pub dune_api_url: String,
+    pub dune_api_key: String,
 }
 
 #[cfg(test)]
@@ -211,6 +276,7 @@ mod tests {
         with_env(&[("CHAIN_ID", None)], || {
             let cfg = AppConfig::load().unwrap();
             assert_eq!(cfg.chain_id, DEFAULT_CHAIN_ID);
+            assert!(!cfg.chain_id_overridden);
         });
     }
 
@@ -219,6 +285,7 @@ mod tests {
         with_env(&[("CHAIN_ID", Some("56"))], || {
             let cfg = AppConfig::load().unwrap();
             assert_eq!(cfg.chain_id, 56);
+            assert!(cfg.chain_id_overridden);
         });
     }
 
@@ -227,6 +294,7 @@ mod tests {
         with_env(&[("CHAIN_ID", Some("not_a_number"))], || {
             let cfg = AppConfig::load().unwrap();
             assert_eq!(cfg.chain_id, DEFAULT_CHAIN_ID);
+            assert!(!cfg.chain_id_overridden);
         });
     }
 
@@ -324,6 +392,7 @@ mod tests {
             cfg.set_chain_id(11155111);
             assert_eq!(cfg.chain_id, 11155111);
             assert_eq!(cfg.rpc_url, "https://ethereum-sepolia-rpc.publicnode.com");
+            assert!(cfg.chain_id_overridden);
         });
     }
 

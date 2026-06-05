@@ -4,12 +4,15 @@ description: >
   Use the ChainPilot CLI to perform DeFi operations on EVM-compatible chains —
   getting swap quotes via the DODO aggregator, simulating and executing swaps,
   managing ERC-20 approvals, querying token metadata, creating tokens through
-  DODO's ERC20V3Factory, minting mintable tokens, checking wallet balances, and
+  DODO's ERC20V3Factory, minting mintable tokens, checking wallet balances,
+  cross-chain portfolio overviews, DeFi positions, PnL analysis, transaction
+  history, and wallet labels (via Debank / Zerion / Goldrush / Dune), and
   running risk analysis. Always use this skill when the user mentions
   chainpilot, wants to swap tokens, create a token, mint a token, check a
-  token's risk score, query wallet balances, approve or revoke a spender, or
-  inspect token contract metadata on any EVM chain (Ethereum, Arbitrum, Base,
-  BNB Chain, Polygon, etc.).
+  token's risk score, query wallet balances, DeFi positions, portfolio
+  breakdown, PnL, transaction history, wallet labels, approve or
+  revoke a spender, or inspect token contract metadata on any EVM chain
+  (Ethereum, Arbitrum, Base, BNB Chain, Polygon, etc.).
 ---
 
 # ChainPilot CLI
@@ -71,8 +74,10 @@ the user explicitly asks for a different one.
 Runtime env vars are intentionally limited to `PRIVATE_KEY`, `KEYSTORE_PATH`,
 `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`,
 `WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`,
-`DODO_API_URL`, `COINGECKO_API_URL`, `COINGECKO_API_KEY`, and
-`DEXSCREENER_API_URL`.
+`DODO_API_URL`, `COINGECKO_API_URL`, `COINGECKO_API_KEY`,
+`DEXSCREENER_API_URL`, `DEBANK_API_KEY`, `DEBANK_API_URL`,
+`ZERION_API_KEY`, `ZERION_API_URL`, `GOLDRUSH_API_KEY`,
+`GOLDRUSH_API_URL`, `DUNE_API_KEY`, and `DUNE_API_URL`.
 
 Runtime config precedence: CLI flag > existing environment variable / `.env` file
 > persistent `config.env` file > compile-time default.
@@ -465,13 +470,186 @@ Calls `abandonOwnership(address(0))`. This is irreversible on the token.
 
 ## `wallet` Subcommands
 
+`wallet` commands query a wallet aggregator for cross-chain balance and
+portfolio data. ChainPilot tries data sources in this fixed order; the first
+one that is configured and succeeds wins:
+
+1. **Debank** (`debank_api_key`) — primary; provides assets, chain breakdown,
+   and DeFi protocol positions.
+2. **Zerion** (`zerion_api_key`) — second-tier; same coverage as Debank
+   including DeFi positions, used when Debank fails or is not configured.
+3. **Goldrush / Covalent** (`goldrush_api_key`) — third-tier; provides assets
+   with USD prices but **no protocol positions**, so `active_protocols` will
+   be empty when this source is used. Goldrush first calls
+   `/address/{addr}/activity/` to discover which chains the wallet has
+   touched, then issues `balances_v2` only on those chains in parallel.
+4. **On-chain RPC** (no key required) — last resort; returns only the native
+   token amount for the active chain. `total_balance_usd`,
+   `chain_allocation`, etc. stay `null` / empty because there is no USD
+   pricing source.
+
+Configure with `chainpilot config set <key> <value>` (see `config list`).
+Without any aggregator key, `wallet balance` falls through to on-chain
+single-chain native balance and `wallet overview` errors out.
+
+The `sources` field in the JSON response records which provider supplied
+each value (`"debank"`, `"zerion"`, `"goldrush"`, `"onchain"`, or `null`).
+
+### `--chain-id` semantics
+
+When `--chain-id <N>` is set explicitly (CLI flag or `CHAIN_ID` env var),
+**every** field is scoped to that single chain — `assets`,
+`chain_allocation`, `total_balance_usd`, `token_allocation`,
+`top_holdings`, and `active_protocols`. Without `--chain-id`, the response
+aggregates across every chain the wallet uses.
+
 ### `wallet balance`
 
 ```bash
-chainpilot [--chain-id <N>] wallet balance <ADDRESS> [--tokens <ADDR1,ADDR2>]
+chainpilot wallet balance <ADDRESS> [--min-usd <USD>]
+chainpilot --chain-id 8453 wallet balance <ADDRESS>
 ```
 
-Native + ERC-20 balances for an address.
+No API key strictly required — falls through to on-chain native balance if no
+aggregator is configured (but USD values will be `null`). Best results with
+`debank_api_key` (preferred), `zerion_api_key`, or `goldrush_api_key`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `wallet` | string | Echo of the input address |
+| `total_balance_usd` | number \| null | Sum across the queried chain(s); `null` on the on-chain fallback |
+| `assets[]` | array | Per-token holdings (chain, symbol, amount, `price_usd`, `value_usd`) |
+| `chain_allocation[]` | array | Per-chain USD totals with percentages |
+| `sources` | object | Which provider supplied each field |
+
+`--min-usd <USD>` hides assets worth less than the threshold (default `1.0`).
+
+### `wallet overview`
+
+```bash
+chainpilot wallet overview <ADDRESS> [--top <N>]
+chainpilot --chain-id 1 wallet overview <ADDRESS>
+```
+
+Requires `debank_api_key` (preferred), `zerion_api_key`, or `goldrush_api_key`
+(at least one). Errors if none are configured.
+
+| Field | Type | Notes |
+|---|---|---|
+| `wallet` | string | Echo of the input address |
+| `total_balance_usd` | number \| null | Sum across queried chain(s) |
+| `chain_allocation[]` | array | Per-chain USD totals with percentages |
+| `token_allocation[]` | array | Cross-chain rollup by token symbol with shares |
+| `top_holdings[]` | array | Top-N tokens by USD value (default 5; tune with `--top`) |
+| `active_protocols[]` | array | DeFi positions grouped by protocol; empty when Goldrush is the only source |
+| `sources` | object | Per-field provider |
+
+`active_protocols` from Debank/Zerion includes the protocol name, primary
+chain, net USD value, and site URL when available.
+
+### `wallet pnl`
+
+```bash
+chainpilot wallet pnl <ADDRESS>
+```
+
+Wallet PnL (profit and loss) analysis. Requires `zerion_api_key`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `wallet` | string | Echo of the input address |
+| `realized_pnl` | number \| null | Realized gains/losses (USD) |
+| `unrealized_pnl` | number \| null | Unrealized gains/losses (USD) |
+| `total_pnl` | number \| null | Sum of realized + unrealized |
+| `roi` | number \| null | Return on investment (%) |
+| `win_rate` | number \| null | Percentage of profitable positions |
+| `total_invested` | number \| null | Total capital deployed (USD) |
+| `total_fee` | number \| null | Total fees paid (USD) |
+| `source` | string | Always `"zerion"` |
+
+### `wallet history`
+
+```bash
+chainpilot wallet history <ADDRESS> [--limit <N>]
+```
+
+Transaction history. Requires `zerion_api_key` or `debank_api_key` (at least one;
+Zerion is tried first, Debank is the fallback).
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--limit` | 20 | Max transactions to return (1–100) |
+
+| Field | Type | Notes |
+|---|---|---|
+| `wallet` | string | Echo of the input address |
+| `transactions[]` | array | List of transactions |
+| `transactions[].tx_hash` | string | Transaction hash |
+| `transactions[].time` | string | Timestamp (RFC 3339) |
+| `transactions[].action` | string | Type: send, receive, swap, approve, deposit, withdraw, etc. |
+| `transactions[].token_in` | string \| null | Inbound token symbol |
+| `transactions[].token_out` | string \| null | Outbound token symbol |
+| `transactions[].value_usd` | number \| null | Transaction value (USD) |
+| `transactions[].amount` | number \| null | Token amount |
+| `transactions[].success` | bool \| null | Whether the tx succeeded |
+| `source` | string | `"zerion"` or `"debank"` |
+
+### `wallet labels`
+
+```bash
+chainpilot wallet labels <ADDRESS>
+```
+
+Wallet behavioral labels and tags. Requires `debank_api_key`, `dune_api_key`, or
+`zerion_api_key` (at least one; Debank is tried first, then Dune, then Zerion).
+
+| Field | Type | Notes |
+|---|---|---|
+| `wallet` | string | Echo of the input address |
+| `labels` | string[] | Flat list of label names |
+| `label_scores[]` | array | Labels with scores and reasons |
+| `label_scores[].label` | string | Label name |
+| `label_scores[].score` | number \| null | Confidence score (0–1) |
+| `label_scores[].reason` | string \| null | Why this label was assigned |
+| `source` | string | `"debank"`, `"dune"`, or `"zerion"` |
+
+Labels can include value-tier tags (whale/dolphin/fish/shrimp), protocol-specific
+tags (aave-user, uniswap-trader), behavior tags (defi-user, yield-farmer,
+liquidity-provider, staker, lender, borrower), and risk profile tags (degen,
+conservative). Available labels depend on the data source.
+
+### `wallet defi`
+
+```bash
+chainpilot wallet defi <ADDRESS> [--min-usd <USD>]
+chainpilot --chain-id 1 wallet defi <ADDRESS>
+```
+
+DeFi positions across protocols — deposits, LPs, staking, borrows, etc.
+Requires `debank_api_key` or `zerion_api_key` (at least one; Debank is the
+primary source with per-portfolio-item extraction, Zerion is the fallback).
+
+| Flag | Default | Notes |
+|---|---|---|
+| `--min-usd` | 1.0 | Hide positions worth less than this (USD) |
+
+| Field | Type | Notes |
+|---|---|---|
+| `wallet` | string | Echo of the input address |
+| `total_value_usd` | number \| null | Sum of all DeFi position values |
+| `positions[]` | array | Individual DeFi positions |
+| `positions[].protocol` | string | Protocol name (e.g. `aave-v3`, `lido`) |
+| `positions[].position_name` | string | Position label (e.g. "Aave V3 USDC Deposit") |
+| `positions[].chain` | string | Chain slug (e.g. `eth`, `base`) |
+| `positions[].value_usd` | number \| null | Position value in USD |
+| `positions[].tokens[]` | array | Tokens held in this position |
+| `positions[].tokens[].symbol` | string | Token symbol |
+| `positions[].tokens[].amount` | number \| null | Token amount |
+| `positions[].position_type` | string | Type: deposit, borrow, stake, liquidity, yield, vault, position |
+| `positions[].site_url` | string \| null | Protocol website |
+| `source` | string | `"debank"` or `"zerion"` |
+
+`--chain-id` scopes results to a single chain.
 
 ---
 
@@ -591,10 +769,15 @@ Remove a configuration key from the config file.
 | `dodo_api_key` | `DODO_API_KEY` | Yes | DODO API key for swap routing |
 | `dodo_project_id` | `DODO_PROJECT_ID` | No | DODO project ID for tokenlist API |
 | `coingecko_api_key` | `COINGECKO_API_KEY` | Yes | CoinGecko API key for price data |
+| `debank_api_key` | `DEBANK_API_KEY` | Yes | Debank Pro OpenAPI key — primary source for `wallet balance` / `wallet overview` |
+| `zerion_api_key` | `ZERION_API_KEY` | Yes | Zerion API key — second-tier wallet aggregator |
+| `goldrush_api_key` | `GOLDRUSH_API_KEY` | Yes | Goldrush / Covalent API key — third-tier wallet aggregator |
+| `dune_api_key` | `DUNE_API_KEY` | Yes | Dune Analytics API key — wallet labels fallback |
 
 Only these keys are supported by `chainpilot config` today. Other runtime
-settings, such as `COINGECKO_API_URL` and `DEXSCREENER_API_URL`, can still be
-provided via environment variables or `.env`.
+settings, such as `COINGECKO_API_URL`, `DEXSCREENER_API_URL`,
+`DEBANK_API_URL`, `ZERION_API_URL`, `GOLDRUSH_API_URL`, and `DUNE_API_URL`,
+can still be provided via environment variables or `.env`.
 
 **Runtime config precedence**: CLI flag > existing environment variable / `.env`
 file > `config.env` file > compile-time default.

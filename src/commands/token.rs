@@ -301,14 +301,14 @@ async fn risk(
                 .search_symbol(&args.token, chain_id)
                 .await;
             if search.candidates.is_empty() {
-                return Ok(crate::output::print_output::<
-                    crate::models::token::TokenRisk,
-                >(
-                    Err(ChainError::TokenNotFound(args.token)),
-                    "token.risk",
-                    output_mode,
-                    OutputContext::new(chain_id, false),
-                ));
+                return Ok(
+                    crate::output::print_output::<crate::models::token::TokenRisk>(
+                        Err(ChainError::TokenNotFound(args.token)),
+                        "token.risk",
+                        output_mode,
+                        OutputContext::new(chain_id, false),
+                    ),
+                );
             }
             return Ok(crate::output::print_output::<
                 crate::models::token::TokenSearchResult,
@@ -320,28 +320,28 @@ async fn risk(
             ));
         }
         Err(e) => {
-            return Ok(crate::output::print_output::<
-                crate::models::token::TokenRisk,
-            >(
-                Err(e),
-                "token.risk",
-                output_mode,
-                OutputContext::new(chain_id, false),
-            ));
+            return Ok(
+                crate::output::print_output::<crate::models::token::TokenRisk>(
+                    Err(e),
+                    "token.risk",
+                    output_mode,
+                    OutputContext::new(chain_id, false),
+                ),
+            );
         }
     };
     let result = api
         .token_metadata
         .fetch_risk(chain_id, &token_ref.address, &token_ref.symbol)
         .await;
-    Ok(crate::output::print_output::<
-        crate::models::token::TokenRisk,
-    >(
-        Ok(result),
-        "token.risk",
-        output_mode,
-        OutputContext::new(chain_id, false),
-    ))
+    Ok(
+        crate::output::print_output::<crate::models::token::TokenRisk>(
+            Ok(result),
+            "token.risk",
+            output_mode,
+            OutputContext::new(chain_id, false),
+        ),
+    )
 }
 
 async fn contract(
@@ -494,9 +494,7 @@ async fn fee(_args: TokenFeeArgs, config: &AppConfig, output_mode: OutputMode) -
     let native_symbol = chain_cfg
         .map(|cfg| cfg.native_token.symbol)
         .unwrap_or("ETH");
-    let native_decimals = chain_cfg
-        .map(|cfg| cfg.native_token.decimals)
-        .unwrap_or(18);
+    let native_decimals = chain_cfg.map(|cfg| cfg.native_token.decimals).unwrap_or(18);
     let result = TokenCreateFee {
         chain_id,
         factory: factory.to_string(),
@@ -1236,10 +1234,12 @@ mod tests {
     use alloy::primitives::{Bytes, Log, LogData, B256};
 
     fn base_config() -> AppConfig {
+        let m = crate::config::test_metadata_config_fields();
         AppConfig {
             rpc_url: "https://ethereum-rpc.publicnode.com".to_string(),
             rpc_url_overridden: false,
             chain_id: 1,
+            chain_id_overridden: false,
             private_key: None,
             keystore_path: None,
             keystore_password_file: None,
@@ -1248,6 +1248,17 @@ mod tests {
             dodo_api_url: "https://api.dodoex.io".to_string(),
             dodo_api_key: String::new(),
             dodo_project_id: String::new(),
+            coingecko_api_url: m.coingecko_api_url,
+            coingecko_api_key: m.coingecko_api_key,
+            dexscreener_api_url: m.dexscreener_api_url,
+            debank_api_url: m.debank_api_url,
+            debank_api_key: m.debank_api_key,
+            goldrush_api_url: m.goldrush_api_url,
+            goldrush_api_key: m.goldrush_api_key,
+            zerion_api_url: m.zerion_api_url,
+            zerion_api_key: m.zerion_api_key,
+            dune_api_url: m.dune_api_url,
+            dune_api_key: m.dune_api_key,
             data_dir: std::env::temp_dir(),
         }
     }

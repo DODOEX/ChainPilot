@@ -62,7 +62,7 @@ DODO_PROJECT_ID=your-id
 
 ## 配置
 
-环境变量刻意收敛为少数几个。运行时只读取 `PRIVATE_KEY`、`KEYSTORE_PATH`、`KEYSTORE_PASSWORD_FILE`、`KEYSTORE_PASSWORD_ENV`、`KEYSTORE_PASSWORD`、`WALLET_ADDRESS`、`CHAIN_ID`、`DODO_API_KEY`、`DODO_PROJECT_ID`、`DODO_API_URL`；有对应 CLI 标志的情况下，CLI 仍然优先。
+环境变量刻意收敛为少数几个。运行时只读取 `PRIVATE_KEY`、`KEYSTORE_PATH`、`KEYSTORE_PASSWORD_FILE`、`KEYSTORE_PASSWORD_ENV`、`KEYSTORE_PASSWORD`、`WALLET_ADDRESS`、`CHAIN_ID`、`DODO_API_KEY`、`DODO_PROJECT_ID`、`DODO_API_URL`、`COINGECKO_API_KEY`、`COINGECKO_API_URL`、`DEXSCREENER_API_URL`、`DEBANK_API_KEY`、`DEBANK_API_URL`、`ZERION_API_KEY`、`ZERION_API_URL`、`GOLDRUSH_API_KEY`、`GOLDRUSH_API_URL`；有对应 CLI 标志的情况下，CLI 仍然优先。
 
 | 变量名                 | CLI 标志              | 默认值                       | 说明                               |
 |------------------------|-----------------------|------------------------------|------------------------------------|
@@ -77,6 +77,9 @@ DODO_PROJECT_ID=your-id
 | `DODO_API_KEY`         | —                     | 编译时内嵌默认值             | DODO 路由 API Key                  |
 | `DODO_PROJECT_ID`      | —                     | 编译时内嵌默认值             | DODO 项目 ID，用于代币列表查询     |
 | `DODO_API_URL`         | —                     | DODO 生产端点                | 覆盖路由 API 地址                  |
+| `DEBANK_API_KEY`       | —                     | —                            | Debank Pro OpenAPI Key（首选钱包数据源） |
+| `ZERION_API_KEY`       | —                     | —                            | Zerion API Key（次选钱包数据源）   |
+| `GOLDRUSH_API_KEY`     | —                     | —                            | Goldrush / Covalent API Key（第三选钱包数据源） |
 
 全局标志（`--json`、`--quiet`、`--private-key`、`--keystore-path`、`--password-file`、`--password-env`、`--wallet-address`、`--rpc-url`、`--chain-id`）适用于所有子命令，需放在子命令名称之前：
 
@@ -307,14 +310,40 @@ chainpilot --chain-id 11155111 token renounce-ownership \
 
 ### Wallet（钱包）
 
-```bash
-# 原生代币和 ERC-20 余额
-chainpilot wallet balance 0xYourAddress
-chainpilot --chain-id 56 wallet balance 0xYourAddress
+`wallet` 命令通过钱包聚合服务查询跨链余额和资产组合。ChainPilot 按以下顺序
+尝试数据源：**Debank → Zerion → Goldrush → 链上 RPC**，第一个配置且响应成功
+的数据源胜出；`--json` 输出中的 `sources` 字段会记录每个字段实际由哪个
+provider 提供。
 
-# 仅查询指定代币余额
-chainpilot wallet balance 0xYourAddress --tokens 0xToken1,0xToken2
+通过 `chainpilot config set` 配置任一聚合服务的 API key：
+
+```bash
+chainpilot config set debank_api_key <KEY>     # 首选
+chainpilot config set zerion_api_key <KEY>     # 次选
+chainpilot config set goldrush_api_key <KEY>   # 第三选
 ```
+
+未配置任何聚合服务 key 时，`wallet balance` 会回退到单链链上 RPC 查询
+（仅原生代币数量、无 USD 计价）；`wallet overview` 则会报错，因为它依赖聚合服务。
+
+```bash
+# 跨链余额（assets、chain_allocation、总 USD）
+chainpilot wallet balance 0xYourAddress
+
+# 把所有字段都限定到一条链
+chainpilot --chain-id 8453 wallet balance 0xYourAddress
+
+# 隐藏低于 $5 的灰尘
+chainpilot wallet balance 0xYourAddress --min-usd 5
+
+# 资产组合概览（chain/token 分布、活跃协议、前 N 大持仓）
+chainpilot wallet overview 0xYourAddress
+chainpilot wallet overview 0xYourAddress --top 10
+```
+
+`--chain-id <N>` 会把响应里**所有**字段（assets、`chain_allocation`、
+`total_balance_usd`、`token_allocation`、`top_holdings`、
+`active_protocols`）都限定到该条链；不传则跨钱包所有活跃链聚合。
 
 ### Risk（风险）
 
