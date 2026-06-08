@@ -9,9 +9,9 @@ pub struct ChainCmd {
 
 #[derive(Subcommand)]
 pub enum ChainAction {
-    /// Chain overview (chain ID, native token, TVL, native price)
+    /// Chain overview (chain ID, native token, price, TVL, fees, 24h activity)
     Info(ChainArgs),
-    /// Chain fund flows (bridge, CEX, stablecoin flows)
+    /// Chain stablecoin fund flows (net, inflow, outflow, per-coin breakdown)
     Flows(ChainArgs),
     /// Chain stablecoin supply and distribution
     Stablecoins(ChainArgs),
