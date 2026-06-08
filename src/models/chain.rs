@@ -37,8 +37,6 @@ pub struct ChainFlows {
     pub net_flow_usd: Option<f64>,
     pub inflow_usd: Option<f64>,
     pub outflow_usd: Option<f64>,
-    pub bridge_flow: Vec<FlowEntry>,
-    pub cex_flow: Vec<FlowEntry>,
     pub stablecoin_flow: Vec<FlowEntry>,
     pub sources: ChainFlowsSources,
 }
@@ -48,8 +46,6 @@ pub struct ChainFlowsSources {
     pub net_flow_usd: Option<String>,
     pub inflow_usd: Option<String>,
     pub outflow_usd: Option<String>,
-    pub bridge_flow: Option<String>,
-    pub cex_flow: Option<String>,
     pub stablecoin_flow: Option<String>,
 }
 
@@ -103,7 +99,6 @@ pub struct ChainProtocolEntry {
     pub name: String,
     pub tvl: Option<f64>,
     pub revenue: Option<f64>,
-    pub users: Option<f64>,
     pub category: Option<String>,
 }
 
@@ -200,26 +195,6 @@ impl crate::output::TableRenderable for ChainFlows {
         ]);
         println!("{}", table);
 
-        if !self.bridge_flow.is_empty() {
-            let mut t = Table::new();
-            t.set_header(vec!["Bridge", "Flow (USD)"]);
-            for entry in &self.bridge_flow {
-                t.add_row(vec![&entry.name, &format_usd(entry.flow_usd)]);
-            }
-            println!("Bridge flows:");
-            println!("{}", t);
-        }
-
-        if !self.cex_flow.is_empty() {
-            let mut t = Table::new();
-            t.set_header(vec!["Exchange", "Flow (USD)"]);
-            for entry in &self.cex_flow {
-                t.add_row(vec![&entry.name, &format_usd(entry.flow_usd)]);
-            }
-            println!("CEX flows:");
-            println!("{}", t);
-        }
-
         if !self.stablecoin_flow.is_empty() {
             let mut t = Table::new();
             t.set_header(vec!["Stablecoin", "Flow (USD)"]);
@@ -278,15 +253,12 @@ impl crate::output::TableRenderable for ChainProtocols {
         }
 
         let mut table = Table::new();
-        table.set_header(vec!["Protocol", "TVL (USD)", "Revenue (USD)", "Users", "Category"]);
+        table.set_header(vec!["Protocol", "TVL (USD)", "Revenue (USD)", "Category"]);
         for p in &self.protocols {
             table.add_row(vec![
                 &p.name,
                 &format_optional_usd(p.tvl),
                 &format_optional_usd(p.revenue),
-                &p.users
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "N/A".to_string()),
                 p.category.as_deref().unwrap_or("N/A"),
             ]);
         }

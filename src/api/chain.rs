@@ -234,7 +234,6 @@ impl ChainClient {
         // Stablecoin flows are the one fund-flow dimension available without a paid
         // plan: DefiLlama exposes per-chain current vs 24h-ago circulating supply.
         // Net mint/burn approximates net stablecoin flow on the chain.
-        // Bridge flows require the paid bridges API; CEX flows have no public source.
         let stablecoins = self.fetch_defillama_stablecoins(&resolved).await?;
 
         let mut stablecoin_flow: Vec<FlowEntry> = stablecoins
@@ -274,15 +273,11 @@ impl ChainClient {
             net_flow_usd: has_data.then_some(net),
             inflow_usd: has_data.then_some(inflow),
             outflow_usd: has_data.then_some(outflow),
-            bridge_flow: Vec::new(),
-            cex_flow: Vec::new(),
             stablecoin_flow,
             sources: ChainFlowsSources {
                 net_flow_usd: sc_source.clone(),
                 inflow_usd: sc_source.clone(),
                 outflow_usd: sc_source.clone(),
-                bridge_flow: None,
-                cex_flow: None,
                 stablecoin_flow: sc_source,
             },
         })
@@ -373,7 +368,6 @@ impl ChainClient {
                     name: p.name.clone(),
                     tvl: chain_tvl,
                     revenue: revenue_by_name.get(&p.name).copied(),
-                    users: None,
                     category: p.category.clone(),
                 }
             })
