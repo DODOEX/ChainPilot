@@ -142,6 +142,7 @@ impl ApiClients {
                 client,
                 crate::config::DEFAULT_DEFILLAMA_API_URL,
                 crate::config::DEFAULT_DEFILLAMA_STABLECOINS_API_URL,
+                crate::config::DEFAULT_GROWTHEPIE_API_URL,
                 &config.coingecko_api_url,
                 config.coingecko_api_key.clone(),
             ),

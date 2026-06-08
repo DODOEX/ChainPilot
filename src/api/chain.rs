@@ -14,6 +14,7 @@ pub struct ChainClient {
     client: Client,
     defillama_url: String,
     stablecoins_url: String,
+    growthepie_url: String,
     coingecko_url: String,
     coingecko_key: Option<String>,
 }
@@ -150,6 +151,7 @@ impl ChainClient {
         client: Client,
         defillama_url: &str,
         stablecoins_url: &str,
+        growthepie_url: &str,
         coingecko_url: &str,
         coingecko_key: Option<String>,
     ) -> Self {
@@ -157,6 +159,7 @@ impl ChainClient {
             client,
             defillama_url: defillama_url.trim_end_matches('/').to_string(),
             stablecoins_url: stablecoins_url.trim_end_matches('/').to_string(),
+            growthepie_url: growthepie_url.trim_end_matches('/').to_string(),
             coingecko_url: coingecko_url.trim_end_matches('/').to_string(),
             coingecko_key,
         }
@@ -173,34 +176,32 @@ impl ChainClient {
         let tvl = matched.tvl;
         let sources_base = "defillama:chains".to_string();
 
-        // Fetch native token price, fees, and active users concurrently.
+        // Fetch native token price, fees, and chain activity concurrently.
         // No native_token guard: DefiLlama omits the symbol for some chains
         // (e.g. Base) whose native price is still resolvable via chain config.
         let price_fut = self.fetch_native_price(&resolved, gecko_id.as_deref(), chain_id);
         let fees_fut = self.fetch_chain_fees(&resolved);
-        let active_fut = self.fetch_chain_active_users(&resolved);
+        // growthepie supplies active addresses / tx count / throughput, but only
+        // for the Ethereum-ecosystem chains it tracks (keyed by EVM chain ID).
+        let gp_key = chain_id.and_then(chain_id_to_growthepie);
+        let activity_fut = async {
+            match gp_key {
+                Some(key) => self.fetch_growthepie_activity(key).await,
+                None => GrowthepieActivity::default(),
+            }
+        };
 
-        let (native_price, fees_result, active_result) =
-            tokio::join!(price_fut, fees_fut, active_fut);
+        let (native_price, fees_result, activity) =
+            tokio::join!(price_fut, fees_fut, activity_fut);
 
         let fees_24h = fees_result.unwrap_or(None);
-        let active_addresses = active_result.unwrap_or(None);
+        let active_addresses = activity.active_addresses;
+        let tx_count_24h = activity.tx_count_24h;
+        let throughput = activity.throughput;
 
-        let price_source = if native_price.is_some() {
-            Some("coingecko".to_string())
-        } else {
-            None
-        };
-        let fees_source = if fees_24h.is_some() {
-            Some("defillama:fees".to_string())
-        } else {
-            None
-        };
-        let active_source = if active_addresses.is_some() {
-            Some("defillama:activeUsers".to_string())
-        } else {
-            None
-        };
+        let price_source = native_price.is_some().then(|| "coingecko".to_string());
+        let fees_source = fees_24h.is_some().then(|| "defillama:fees".to_string());
+        let gp_source = || "growthepie".to_string();
 
         Ok(ChainInfo {
             chain: resolved,
@@ -209,19 +210,19 @@ impl ChainClient {
             native_price,
             tvl,
             active_addresses,
-            tx_count_24h: None,
+            tx_count_24h,
             fees_24h,
-            throughput: None,
+            throughput,
             sources: ChainInfoSources {
                 chain: Some(sources_base.clone()),
                 chain_id: Some(sources_base.clone()),
                 native_token: Some(sources_base.clone()),
                 native_price: price_source,
                 tvl: Some(sources_base),
-                active_addresses: active_source,
-                tx_count_24h: None,
+                active_addresses: active_addresses.map(|_| gp_source()),
+                tx_count_24h: tx_count_24h.map(|_| gp_source()),
                 fees_24h: fees_source,
-                throughput: None,
+                throughput: throughput.map(|_| gp_source()),
             },
         })
     }
@@ -616,36 +617,54 @@ impl ChainClient {
         Ok(value.get("total24h").and_then(|v| v.as_f64()))
     }
 
-    /// Fetch active users for a chain from DefiLlama.
-    async fn fetch_chain_active_users(&self, chain_name: &str) -> Result<Option<u64>> {
-        let url = format!("{}/overview/activeUsers", self.defillama_url);
-        let req = self
-            .client
-            .get(&url)
-            .query(&[("chain", chain_name)]);
-        let body = match send_retrying(req, "defillama.chain_active_users").await {
+    /// Fetch latest daily active addresses, tx count, and throughput for a chain
+    /// from growthepie's per-chain JSON. Returns defaults (all None) on any
+    /// failure so callers degrade gracefully.
+    async fn fetch_growthepie_activity(&self, url_key: &str) -> GrowthepieActivity {
+        let url = format!("{}/v1/chains/{}.json", self.growthepie_url, url_key);
+        let body = match send_retrying(self.client.get(&url), "growthepie.chain").await {
             Ok(resp) => match resp.error_for_status() {
-                Ok(r) => r.text().await.map_err(ChainError::Http)?,
-                Err(_) => return Ok(None),
+                Ok(r) => match r.text().await {
+                    Ok(b) => b,
+                    Err(_) => return GrowthepieActivity::default(),
+                },
+                Err(_) => return GrowthepieActivity::default(),
             },
-            Err(_) => return Ok(None),
+            Err(_) => return GrowthepieActivity::default(),
         };
 
         let value: Value = match serde_json::from_str(&body) {
             Ok(v) => v,
-            Err(_) => return Ok(None),
+            Err(_) => return GrowthepieActivity::default(),
         };
 
-        // Try to extract total active users for the chain
-        // Response may have a `total24h` or `users24h` field
-        let count = value
-            .get("total24h")
-            .or_else(|| value.get("users24h"))
-            .and_then(|v| v.as_f64())
-            .map(|v| v as u64);
+        let metrics = value.get("data").and_then(|d| d.get("metrics"));
+        let latest = |key: &str| -> Option<f64> {
+            metrics?
+                .get(key)?
+                .get("daily")?
+                .get("data")?
+                .as_array()?
+                .last()?
+                .as_array()?
+                .get(1)?
+                .as_f64()
+        };
 
-        Ok(count)
+        GrowthepieActivity {
+            active_addresses: latest("daa").map(|v| v as u64),
+            tx_count_24h: latest("txcount").map(|v| v as u64),
+            throughput: latest("throughput"),
+        }
     }
+}
+
+/// Latest chain-activity metrics from growthepie.
+#[derive(Default)]
+struct GrowthepieActivity {
+    active_addresses: Option<u64>,
+    tx_count_24h: Option<u64>,
+    throughput: Option<f64>,
 }
 
 struct SimpleStablecoin {
@@ -696,6 +715,40 @@ fn resolve_chain(input: &str, chains: &[DefiLlamaChain]) -> Result<String> {
         "Chain '{}' not found. Use a chain name (ethereum), ID (1), or abbreviation (eth)",
         input
     )))
+}
+
+/// Map an EVM chain ID to growthepie's `url_key` (used in `chains/{key}.json`).
+/// growthepie tracks the Ethereum ecosystem (L1 + L2s); chains it doesn't cover
+/// (e.g. BSC, Avalanche) return None and keep activity fields as N/A.
+fn chain_id_to_growthepie(chain_id: u64) -> Option<&'static str> {
+    Some(match chain_id {
+        1 => "ethereum",
+        10 => "optimism",
+        130 => "unichain",
+        137 => "polygon-pos",
+        169 => "manta",
+        252 => "fraxtal",
+        324 => "zksync-era",
+        480 => "worldchain",
+        1088 => "metis",
+        1135 => "lisk",
+        1625 => "gravity",
+        1868 => "soneium",
+        2020 => "ronin",
+        5000 => "mantle",
+        8453 => "base",
+        34443 => "mode",
+        42161 => "arbitrum",
+        42170 => "arbitrum-nova",
+        42220 => "celo",
+        48900 => "zircuit",
+        57073 => "ink",
+        59144 => "linea",
+        98866 => "plume",
+        167000 => "taiko",
+        534352 => "scroll",
+        _ => return None,
+    })
 }
 
 /// DefiLlama uses inconsistent chain names across endpoints. The canonical name
