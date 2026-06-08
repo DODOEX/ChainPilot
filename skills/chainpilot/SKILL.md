@@ -683,6 +683,47 @@ Single approval state.
 
 ---
 
+## `protocol` Subcommands
+
+Protocol-level analytics from DefiLlama. The `<PROTOCOL>` argument is a DefiLlama
+slug or protocol name (e.g. `lido`, `aave`, `uniswap`). No API key required.
+
+### `protocol info`
+
+```bash
+chainpilot protocol info <PROTOCOL>
+```
+
+Overview: name, category, primary chain, website, description, current TVL, 24h
+revenue, and 24h fees.
+
+### `protocol tvl`
+
+```bash
+chainpilot protocol tvl <PROTOCOL> [--limit <N>] [--offset <N>]
+```
+
+Current TVL, 24h/7d/30d TVL change, and a TVL history series. `--limit` defaults
+to 7 (max 1000) newest points; `--offset` skips that many newest points first.
+
+### `protocol revenue`
+
+```bash
+chainpilot protocol revenue <PROTOCOL>
+```
+
+Revenue (24h/7d/30d) and fees (24h/7d).
+
+### `protocol chains`
+
+```bash
+chainpilot protocol chains <PROTOCOL>
+```
+
+The protocol's TVL distribution across the chains it's deployed on.
+
+---
+
 ## `chain` Subcommands
 
 Chain-level analytics. The `<CHAIN>` argument accepts a name, chain ID, or alias
