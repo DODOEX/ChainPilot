@@ -711,7 +711,9 @@ fn resolve_chain(input: &str, chains: &[DefiLlamaChain]) -> Result<String> {
     )))
 }
 
-/// Map an EVM chain ID to growthepie's `url_key` (used in `chains/{key}.json`).
+/// Map an EVM chain ID to growthepie's chain key used in `chains/{key}.json`.
+/// This is the master `chains` dict key (underscored, e.g. `polygon_pos`), NOT
+/// the `url_key` (dashed) — the file endpoint 403s on the dashed form.
 /// growthepie tracks the Ethereum ecosystem (L1 + L2s); chains it doesn't cover
 /// (e.g. BSC, Avalanche) return None and keep activity fields as N/A.
 fn chain_id_to_growthepie(chain_id: u64) -> Option<&'static str> {
@@ -719,10 +721,10 @@ fn chain_id_to_growthepie(chain_id: u64) -> Option<&'static str> {
         1 => "ethereum",
         10 => "optimism",
         130 => "unichain",
-        137 => "polygon-pos",
+        137 => "polygon_pos",
         169 => "manta",
         252 => "fraxtal",
-        324 => "zksync-era",
+        324 => "zksync_era",
         480 => "worldchain",
         1088 => "metis",
         1135 => "lisk",
@@ -733,7 +735,7 @@ fn chain_id_to_growthepie(chain_id: u64) -> Option<&'static str> {
         8453 => "base",
         34443 => "mode",
         42161 => "arbitrum",
-        42170 => "arbitrum-nova",
+        42170 => "arbitrum_nova",
         42220 => "celo",
         48900 => "zircuit",
         57073 => "ink",
