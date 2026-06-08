@@ -93,7 +93,9 @@ struct DefiLlamaProtocol {
     slug: String,
     category: Option<String>,
     chains: Option<Vec<String>>,
+    #[allow(dead_code)]
     tvl: Option<f64>,
+    #[serde(rename = "chainTvls")]
     chain_tvls: Option<std::collections::HashMap<String, f64>>,
     #[allow(dead_code)]
     #[serde(rename = "change_1d")]
@@ -359,11 +361,13 @@ impl ChainClient {
                     .unwrap_or(false)
             })
             .map(|p| {
+                // Use the chain-specific TVL only. Do NOT fall back to the
+                // protocol's global TVL, which would overstate chains where the
+                // protocol's TVL isn't broken down (e.g. CEX entries).
                 let chain_tvl = p
                     .chain_tvls
                     .as_ref()
-                    .and_then(|tvls| tvls.get(&resolved).copied())
-                    .or(p.tvl);
+                    .and_then(|tvls| tvls.get(&resolved).copied());
                 ChainProtocolEntry {
                     name: p.name.clone(),
                     tvl: chain_tvl,
@@ -584,13 +588,16 @@ impl ChainClient {
         resp.prices.get(coingecko_id)?.usd
     }
 
-    /// Fetch 24h fees for a chain from DefiLlama `/summary/fees/{chain}`.
+    /// Fetch 24h fees for a chain from DefiLlama `/overview/fees/{chain}`.
+    /// (`/summary/fees/{x}` is a *protocol* endpoint and returns wrong/missing
+    /// data when given a chain name.)
     async fn fetch_chain_fees(&self, chain_name: &str) -> Result<Option<f64>> {
-        let url = format!("{}/summary/fees/{}", self.defillama_url, chain_name);
-        let req = self
-            .client
-            .get(&url)
-            .query(&[("dataType", "dailyFees")]);
+        let url = format!("{}/overview/fees/{}", self.defillama_url, chain_name);
+        let req = self.client.get(&url).query(&[
+            ("excludeTotalDataChart", "true"),
+            ("excludeTotalDataChartBreakdown", "true"),
+            ("dataType", "dailyFees"),
+        ]);
         let body = match send_retrying(req, "defillama.chain_fees").await {
             Ok(resp) => match resp.error_for_status() {
                 Ok(r) => r.text().await.map_err(ChainError::Http)?,
