@@ -769,10 +769,17 @@ share percentages.
 chainpilot chain protocols <CHAIN> [--limit <N>]
 ```
 
-Top protocols on the chain by chain-specific TVL, with 24h revenue and category.
-`--limit` defaults to 20 (max 100). TVL is the protocol's TVL on this chain
-specifically; it shows `N/A` when DefiLlama has no per-chain breakdown for that
-protocol (no fallback to the protocol's global TVL).
+Top on-chain DeFi protocols on the chain by chain-specific TVL, with 24h revenue
+and category. `--limit` defaults to 20 (max 100). TVL is the protocol's TVL on
+this chain specifically (no fallback to its global TVL).
+
+The list is filtered to genuine on-chain protocols:
+
+- Non-protocol categories are excluded — `CEX`, `Bridge`, `Canonical Bridge`,
+  `Cross Chain Bridge`, and `Chain`. These report a per-chain TVL in DefiLlama
+  (e.g. Binance CEX has an Ethereum TVL) and would otherwise dominate the list.
+- Protocols with no per-chain TVL for this chain are dropped, so every row shows
+  a real TVL figure.
 
 ---
 
