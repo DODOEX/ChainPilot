@@ -93,6 +93,7 @@ struct DefiLlamaProtocol {
     #[allow(dead_code)]
     slug: String,
     category: Option<String>,
+    #[allow(dead_code)]
     chains: Option<Vec<String>>,
     #[allow(dead_code)]
     tvl: Option<f64>,
@@ -347,29 +348,31 @@ impl ChainClient {
         let revenue_by_name = revenue_by_name.unwrap_or_default();
         let has_revenue = !revenue_by_name.is_empty();
 
-        // Filter protocols by chain and sort by TVL descending
+        // Keep only on-chain DeFi protocols with a chain-specific TVL for this
+        // chain. Two filters apply:
+        //   1. `chainTvls[chain]` must be present — we read the chain's net TVL
+        //      from that exact key and deliberately do NOT fall back to the
+        //      protocol's global TVL, which would overstate the chain.
+        //   2. The category must not be a non-protocol bucket. CEX, bridge and
+        //      canonical-bridge/chain entries DO report a per-chain TVL (e.g.
+        //      Binance CEX has chainTvls["Ethereum"]) and would otherwise
+        //      dominate the list, so they're excluded by category.
         let mut protocols: Vec<ChainProtocolEntry> = all_protocols
             .iter()
-            .filter(|p| {
-                p.chains
-                    .as_ref()
-                    .map(|chains| chains.iter().any(|c| c.eq_ignore_ascii_case(&resolved)))
-                    .unwrap_or(false)
-            })
-            .map(|p| {
-                // Use the chain-specific TVL only. Do NOT fall back to the
-                // protocol's global TVL, which would overstate chains where the
-                // protocol's TVL isn't broken down (e.g. CEX entries).
+            .filter_map(|p| {
+                if is_excluded_category(p.category.as_deref()) {
+                    return None;
+                }
                 let chain_tvl = p
                     .chain_tvls
                     .as_ref()
-                    .and_then(|tvls| tvls.get(&resolved).copied());
-                ChainProtocolEntry {
+                    .and_then(|tvls| tvls.get(&resolved).copied())?;
+                Some(ChainProtocolEntry {
                     name: p.name.clone(),
-                    tvl: chain_tvl,
+                    tvl: Some(chain_tvl),
                     revenue: revenue_by_name.get(&p.name).copied(),
                     category: p.category.clone(),
-                }
+                })
             })
             .collect();
 
@@ -669,6 +672,27 @@ struct SimpleStablecoin {
 
 /// Resolve user input (chain ID, abbreviation, alias, or name) to the
 /// canonical DefiLlama chain name. Matching order:
+/// DefiLlama categories that aren't on-chain DeFi protocols. Each still reports
+/// a per-chain TVL (e.g. Binance CEX has `chainTvls["Ethereum"]`), so they're
+/// excluded by category rather than by missing data. Compared case-insensitively.
+const EXCLUDED_PROTOCOL_CATEGORIES: &[&str] = &[
+    "CEX",
+    "Bridge",
+    "Canonical Bridge",
+    "Cross Chain Bridge",
+    "Chain",
+];
+
+/// Whether a protocol's category should be excluded from a chain's protocol
+/// list. A missing category is kept (treated as a regular protocol).
+fn is_excluded_category(category: Option<&str>) -> bool {
+    category.is_some_and(|c| {
+        EXCLUDED_PROTOCOL_CATEGORIES
+            .iter()
+            .any(|x| x.eq_ignore_ascii_case(c))
+    })
+}
+
 /// 1. Numeric chain ID (e.g. "1", "8453")
 /// 2. Well-known abbreviation/alias (e.g. "eth", "arb", "op")
 /// 3. Exact DefiLlama name (case-insensitive)
