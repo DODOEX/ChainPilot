@@ -1,3 +1,4 @@
+mod chain;
 mod debank;
 mod defillama;
 mod dodo;
@@ -6,6 +7,7 @@ mod goldrush;
 mod token_metadata;
 mod zerion;
 
+pub use chain::ChainClient;
 pub use debank::{debank_chain_to_id, DebankAssetRecord, DebankClient};
 pub use defillama::DefillamaClient;
 pub use dodo::DodoClient;
@@ -89,6 +91,7 @@ pub struct ApiClients {
     pub goldrush: GoldrushClient,
     pub dune: DuneClient,
     pub defillama: DefillamaClient,
+    pub chain: ChainClient,
 }
 
 impl ApiClients {
@@ -134,7 +137,15 @@ impl ApiClients {
                 &config.goldrush_api_key,
             ),
             dune: DuneClient::new(client.clone(), &config.dune_api_url, &config.dune_api_key),
-            defillama: DefillamaClient::new(client, crate::config::DEFAULT_DEFILLAMA_API_URL),
+            defillama: DefillamaClient::new(client.clone(), crate::config::DEFAULT_DEFILLAMA_API_URL),
+            chain: ChainClient::new(
+                client,
+                crate::config::DEFAULT_DEFILLAMA_API_URL,
+                crate::config::DEFAULT_DEFILLAMA_STABLECOINS_API_URL,
+                crate::config::DEFAULT_GROWTHEPIE_API_URL,
+                &config.coingecko_api_url,
+                config.coingecko_api_key.clone(),
+            ),
         })
     }
 }

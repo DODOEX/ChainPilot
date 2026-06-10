@@ -6,12 +6,14 @@ description: >
   managing ERC-20 approvals, querying token metadata, creating tokens through
   DODO's ERC20V3Factory, minting mintable tokens, checking wallet balances,
   cross-chain portfolio overviews, DeFi positions, PnL analysis, transaction
-  history, and wallet labels (via Debank / Zerion / Goldrush / Dune), and
-  running risk analysis. Always use this skill when the user mentions
-  chainpilot, wants to swap tokens, create a token, mint a token, check a
-  token's risk score, query wallet balances, DeFi positions, portfolio
-  breakdown, PnL, transaction history, wallet labels, approve or
-  revoke a spender, or inspect token contract metadata on any EVM chain
+  history, and wallet labels (via Debank / Zerion / Goldrush / Dune),
+  chain-level analytics (TVL, fees, native price, stablecoins, top protocols,
+  active addresses / tx count / throughput), and running risk analysis. Always
+  use this skill when the user mentions chainpilot, wants to swap tokens, create
+  a token, mint a token, check a token's risk score, query wallet balances,
+  DeFi positions, portfolio breakdown, PnL, transaction history, wallet labels,
+  inspect a chain's TVL / fees / stablecoins / top protocols / activity, approve
+  or revoke a spender, or inspect token contract metadata on any EVM chain
   (Ethereum, Arbitrum, Base, BNB Chain, Polygon, etc.).
 ---
 
@@ -678,6 +680,106 @@ chainpilot [--chain-id <N>] risk approval <ADDRESS> --token <TOKEN> --spender <S
 ```
 
 Single approval state.
+
+---
+
+## `protocol` Subcommands
+
+Protocol-level analytics from DefiLlama. The `<PROTOCOL>` argument is a DefiLlama
+slug or protocol name (e.g. `lido`, `aave`, `uniswap`). No API key required.
+
+### `protocol info`
+
+```bash
+chainpilot protocol info <PROTOCOL>
+```
+
+Overview: name, category, primary chain, website, description, current TVL, 24h
+revenue, and 24h fees.
+
+### `protocol tvl`
+
+```bash
+chainpilot protocol tvl <PROTOCOL> [--limit <N>] [--offset <N>]
+```
+
+Current TVL, 24h/7d/30d TVL change, and a TVL history series. `--limit` defaults
+to 7 (max 1000) newest points; `--offset` skips that many newest points first.
+
+### `protocol revenue`
+
+```bash
+chainpilot protocol revenue <PROTOCOL>
+```
+
+Revenue (24h/7d/30d) and fees (24h/7d).
+
+### `protocol chains`
+
+```bash
+chainpilot protocol chains <PROTOCOL>
+```
+
+The protocol's TVL distribution across the chains it's deployed on.
+
+---
+
+## `chain` Subcommands
+
+Chain-level analytics. The `<CHAIN>` argument accepts a name, chain ID, or alias
+(e.g. `ethereum` / `1` / `eth`, `bsc` / `bnb`, `base`, `arbitrum`). Data comes
+from free public sources (DefiLlama, CoinGecko, growthepie) — no API key required.
+Every field is rendered with a `Source` column (or `sources` object in `--json`)
+naming its data origin; fields with no available source show `N/A`.
+
+### `chain info`
+
+```bash
+chainpilot chain info <CHAIN>
+```
+
+Overview: chain ID, native token and USD price, TVL, 24h fees, and 24h activity
+(active addresses, tx count, throughput). Activity fields come from growthepie and
+are only available for the Ethereum-ecosystem chains it tracks (L1 + L2s such as
+Base, Arbitrum, Optimism, Polygon, Linea, Scroll). Independent L1s like BNB Chain
+and Avalanche show `N/A` for active addresses / tx count / throughput.
+
+### `chain flows`
+
+```bash
+chainpilot chain flows <CHAIN>
+```
+
+Stablecoin-based fund flow: net flow, inflow, outflow, and a per-stablecoin 24h
+breakdown (mint vs burn). Scope is stablecoins only — not total cross-chain flow;
+bridge and CEX flows have no free data source and are not reported.
+
+### `chain stablecoins`
+
+```bash
+chainpilot chain stablecoins <CHAIN>
+```
+
+Stablecoin supply on the chain, 24h supply change, and a per-coin breakdown with
+share percentages.
+
+### `chain protocols`
+
+```bash
+chainpilot chain protocols <CHAIN> [--limit <N>]
+```
+
+Top on-chain DeFi protocols on the chain by chain-specific TVL, with 24h revenue
+and category. `--limit` defaults to 20 (max 100). TVL is the protocol's TVL on
+this chain specifically (no fallback to its global TVL).
+
+The list is filtered to genuine on-chain protocols:
+
+- Non-protocol categories are excluded — `CEX`, `Bridge`, `Canonical Bridge`,
+  `Cross Chain Bridge`, and `Chain`. These report a per-chain TVL in DefiLlama
+  (e.g. Binance CEX has an Ethereum TVL) and would otherwise dominate the list.
+- Protocols with no per-chain TVL for this chain are dropped, so every row shows
+  a real TVL figure.
 
 ---
 

@@ -1,3 +1,4 @@
+pub mod chain;
 pub mod config;
 pub mod protocol;
 pub mod risk;
@@ -67,6 +68,8 @@ pub enum Commands {
     Wallet(wallet::WalletCmd),
     /// Risk analysis (token, wallet, approval)
     Risk(risk::RiskCmd),
+    /// Chain analytics (info, flows, stablecoins, protocols)
+    Chain(chain::ChainCmd),
     /// Manage API keys and configuration
     Config(config::ConfigCmd),
 }

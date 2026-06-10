@@ -16,6 +16,10 @@ pub const DEFAULT_GOLDRUSH_API_URL: &str = "https://api.covalenthq.com/v1";
 pub const DEFAULT_ZERION_API_URL: &str = "https://api.zerion.io/v1";
 pub const DEFAULT_DUNE_API_URL: &str = "https://api.dune.com/api/v1";
 pub const DEFAULT_DEFILLAMA_API_URL: &str = "https://api.llama.fi";
+/// DefiLlama serves stablecoin data from a separate host, not `api.llama.fi`.
+pub const DEFAULT_DEFILLAMA_STABLECOINS_API_URL: &str = "https://stablecoins.llama.fi";
+/// growthepie open API: per-chain activity (active addresses, tx count, throughput).
+pub const DEFAULT_GROWTHEPIE_API_URL: &str = "https://api.growthepie.xyz";
 pub const DEFAULT_KEYSTORE_PASSWORD_ENV: &str = "KEYSTORE_PASSWORD";
 
 /// Compile-time default: set `DODO_API_KEY` at build time to bake a key into the binary.
