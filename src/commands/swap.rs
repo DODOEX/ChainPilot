@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use alloy_signer_local::PrivateKeySigner;
 
 use crate::api::ApiClients;
-use crate::chain::OnChainClient;
+use crate::chain::{AddressRef, OnChainClient};
 use crate::cli::swap::{
     ApproveArgs, ExecuteArgs, HistoryArgs, QuoteArgs, RevokeArgs, SimulateArgs, StatusArgs,
     SwapAction, SwapCmd,
@@ -228,6 +228,62 @@ impl ApprovalDeps for LiveApprovalDeps<'_> {
     }
 }
 
+/// If `raw` parses as a non-EVM address, return a swap-specific error
+/// explaining why DODO routing can't quote it. Native token symbols and
+/// `0x` EVM addresses return `None` so they continue through the resolver.
+fn swap_non_evm_token_error(raw: &str, flag: &str) -> Option<ChainError> {
+    match AddressRef::parse(raw) {
+        Ok(AddressRef::Svm(_)) => Some(ChainError::Config(format!(
+            "swap is not supported on Solana — DODO's route API is EVM-only ({flag} is an SPL mint)"
+        ))),
+        Ok(AddressRef::Bvm(_)) => Some(ChainError::Config(format!(
+            "swap is not supported on Bitcoin mainnet — DODO's route API is EVM-only ({flag} is a Bitcoin address)"
+        ))),
+        _ => None,
+    }
+}
+
+/// Classify a transaction hash by shape. EVM hashes and Bitcoin txids both
+/// encode 32 bytes as hex, so they're structurally indistinguishable. We
+/// disambiguate by the `0x` prefix: with the prefix it's an EVM hash, and
+/// without it on a 64-char hex string we assume the user meant a Bitcoin
+/// txid — DODO swap history doesn't track BTC tx and the EVM RPC would
+/// only report "Transaction not found", which is misleading.
+fn swap_non_evm_tx_hash_error(raw: &str) -> Option<ChainError> {
+    let trimmed = raw.trim();
+    let stripped = trimmed.strip_prefix("0x");
+
+    if let Some(hex) = stripped {
+        if hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+    }
+
+    // 64 hex chars without `0x` → almost certainly a BTC txid (or a malformed
+    // EVM hash, but we lean toward the more helpful BVM message).
+    if trimmed.len() == 64 && trimmed.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Some(ChainError::Config(
+            "swap status is not supported for Bitcoin mainnet — DODO swap history only tracks EVM transactions (an EVM transaction hash must include the 0x prefix)".to_string(),
+        ));
+    }
+
+    // base58-shaped strings ≥ 32 chars are Solana signatures (~88 typical).
+    let looks_base58 = !trimmed.is_empty()
+        && trimmed.bytes().all(|b| {
+            b.is_ascii_alphanumeric() && b != b'0' && b != b'O' && b != b'I' && b != b'l'
+        });
+    if looks_base58 && trimmed.len() >= 32 {
+        return Some(ChainError::Config(
+            "swap status is not supported for Solana — DODO swap history only tracks EVM transactions".to_string(),
+        ));
+    }
+
+    Some(ChainError::Config(format!(
+        "swap status expects an EVM transaction hash (0x + 64 hex chars; got {} chars)",
+        trimmed.len()
+    )))
+}
+
 pub async fn handle(
     cmd: SwapCmd,
     config: &AppConfig,
@@ -253,6 +309,21 @@ async fn quote(
     api: &ApiClients,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    // DODO's `getdodoroute` endpoint is EVM-only — it takes hex token
+    // addresses and a numeric chain_id, with no SVM / BVM path. Reject any
+    // input shaped as an SPL mint or BTC address up-front so the user sees a
+    // routing-level error, not a vague "Token not found" from the resolver.
+    if let Some(err) = swap_non_evm_token_error(&args.from, "--from")
+        .or_else(|| swap_non_evm_token_error(&args.to, "--to"))
+    {
+        return Ok(crate::output::print_output::<crate::models::quote::Quote>(
+            Err(err),
+            "swap.quote",
+            output_mode,
+            OutputContext::new(config.chain_id, false),
+        ));
+    }
+
     let chain_id = config.chain_id;
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_onchain;
@@ -911,6 +982,21 @@ async fn execute_quote_with_deps<D: ExecuteDeps>(
 
 async fn status(args: StatusArgs, config: &AppConfig, output_mode: OutputMode) -> Result<ExitCode> {
     let chain_id = config.chain_id;
+
+    // Reject obviously non-EVM transaction hashes before we hit alloy. A
+    // 64-char hex with no `0x` prefix happens to be a valid Bitcoin txid and
+    // *would* parse as an EVM hash — but the EVM RPC will then report
+    // "Transaction not found", misleading the user. SPL signatures are
+    // base58 and never look like EVM hashes; flag both shapes here.
+    if let Some(err) = swap_non_evm_tx_hash_error(&args.tx_hash) {
+        return Ok(crate::output::print_output::<crate::chain::TxStatus>(
+            Err(err),
+            "swap.status",
+            output_mode,
+            OutputContext::new(chain_id, false),
+        ));
+    }
+
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     match crate::chain::get_tx_receipt(&chain_onchain, &args.tx_hash).await {
         Ok(Some(status)) => Ok(crate::output::print_output::<crate::chain::TxStatus>(
