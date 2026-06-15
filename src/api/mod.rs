@@ -4,6 +4,7 @@ mod defillama;
 mod dodo;
 mod dune;
 mod goldrush;
+mod jupiter;
 mod mempool;
 mod token_metadata;
 mod zerion;
@@ -14,6 +15,8 @@ pub use defillama::DefillamaClient;
 pub use dodo::DodoClient;
 pub use dune::DuneClient;
 pub use goldrush::{GoldrushAssetRecord, GoldrushChainBalance, GoldrushClient};
+#[allow(unused_imports)]
+pub use jupiter::{JupiterClient, JupiterToken, DEFAULT_JUPITER_API_URL};
 // BitcoinBalance / BitcoinTx are exposed via MempoolClient methods directly;
 // re-export them so future callers outside wallet.rs can name the types
 // without paying the warning tax today.
@@ -99,6 +102,7 @@ pub struct ApiClients {
     pub defillama: DefillamaClient,
     pub chain: ChainClient,
     pub mempool: MempoolClient,
+    pub jupiter: JupiterClient,
 }
 
 impl ApiClients {
@@ -153,7 +157,8 @@ impl ApiClients {
                 &config.coingecko_api_url,
                 config.coingecko_api_key.clone(),
             ),
-            mempool: MempoolClient::new(client, DEFAULT_MEMPOOL_API_URL),
+            mempool: MempoolClient::new(client.clone(), DEFAULT_MEMPOOL_API_URL),
+            jupiter: JupiterClient::new(client, DEFAULT_JUPITER_API_URL),
         })
     }
 }

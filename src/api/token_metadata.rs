@@ -590,6 +590,135 @@ impl TokenMetadataClient {
             .collect()
     }
 
+    /// Solana-specific enrichment for a `TokenInfo` already populated with
+    /// `address` (SPL mint) and basic identity. Pulls CoinGecko data via
+    /// `coins/solana/contract/{mint}` and DexScreener pool data; the result
+    /// merges in price, market cap, top liquidity, etc. `is_native` logic and
+    /// `goplus` risk lookups don't apply on Solana and are skipped.
+    pub async fn enrich_svm(&self, mut info: TokenInfo) -> TokenInfo {
+        let coingecko = self.fetch_coingecko("solana", &info.address).await.ok();
+        let dexscreener = self.fetch_dexscreener(&info.address).await.ok();
+
+        let mut patch = TokenMetadataPatch::default();
+        apply_coingecko(&mut patch, coingecko);
+        apply_dexscreener(&mut patch, dexscreener, &info.address);
+        apply_patch(&mut info, patch);
+        info
+    }
+
+    /// Solana-specific price lookup. Tags the returned `TokenPrice` with
+    /// `chain_id = 0` (sentinel for non-EVM) so JSON consumers can detect
+    /// the lack of an EVM chain context.
+    pub async fn fetch_price_svm(&self, mint: &str, symbol: &str) -> crate::models::token::TokenPrice {
+        use crate::models::token::{TokenPrice, TokenPriceSources};
+
+        let coingecko = self.fetch_coingecko("solana", mint).await.ok();
+        let dexscreener = self.fetch_dexscreener(mint).await.ok();
+
+        let mut price = TokenPrice {
+            address: mint.to_string(),
+            symbol: symbol.to_string(),
+            chain_id: 0,
+            price: None,
+            price_change_1h: None,
+            price_change_24h: None,
+            price_change_7d: None,
+            high_24h: None,
+            low_24h: None,
+            sources: TokenPriceSources::default(),
+        };
+        apply_coingecko_price(&mut price, coingecko);
+        apply_dexscreener_price(&mut price, dexscreener, mint);
+        price
+    }
+
+    /// Solana-specific liquidity lookup. DexScreener's `/tokens/{address}`
+    /// endpoint already returns Solana pools when given an SPL mint, so this
+    /// just bypasses the EVM `is_native`/wrapped-address logic and labels
+    /// `chain_id = 0`.
+    pub async fn fetch_liquidity_svm(
+        &self,
+        mint: &str,
+        symbol: &str,
+    ) -> crate::models::token::TokenLiquidity {
+        use crate::models::token::{TokenLiquidity, TokenLiquiditySources, TokenLiquidityTopPair};
+
+        let pairs = match self.fetch_dexscreener(mint).await {
+            Ok(resp) => resp.pairs.unwrap_or_default(),
+            Err(_) => {
+                return TokenLiquidity {
+                    address: mint.to_string(),
+                    symbol: symbol.to_string(),
+                    chain_id: 0,
+                    top_liquidity: None,
+                    pair_count: 0,
+                    top_pair: None,
+                    sources: TokenLiquiditySources::default(),
+                };
+            }
+        };
+
+        let matching: Vec<&DexScreenerPair> = pairs
+            .iter()
+            .filter(|p| {
+                p.base_token
+                    .as_ref()
+                    .and_then(|t| t.address.as_deref())
+                    .is_some_and(|a| a.eq_ignore_ascii_case(mint))
+            })
+            .collect();
+
+        let top_liquidity = matching
+            .iter()
+            .filter_map(|p| p.liquidity.as_ref().and_then(|l| l.usd))
+            .fold(0.0f64, f64::max);
+        let top_liquidity = if top_liquidity > 0.0 {
+            Some(top_liquidity)
+        } else {
+            None
+        };
+
+        let top_pair = matching
+            .iter()
+            .max_by(|a, b| {
+                let la = a.liquidity.as_ref().and_then(|l| l.usd).unwrap_or(0.0);
+                let lb = b.liquidity.as_ref().and_then(|l| l.usd).unwrap_or(0.0);
+                la.partial_cmp(&lb).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .and_then(|p| {
+                let pair_address = p.pair_address.clone()?;
+                let dex = p.dex_id.clone().unwrap_or_else(|| "unknown".to_string());
+                let liquidity = p.liquidity.as_ref().and_then(|l| l.usd);
+                let volume_24h = p.volume.as_ref().and_then(|v| v.h24);
+                Some(TokenLiquidityTopPair {
+                    pair_address,
+                    dex,
+                    liquidity,
+                    volume_24h,
+                })
+            });
+
+        let src = if matching.is_empty() {
+            TokenLiquiditySources::default()
+        } else {
+            TokenLiquiditySources {
+                top_liquidity: Some("dexscreener".to_string()),
+                pair_count: Some("dexscreener".to_string()),
+                top_pair: Some("dexscreener".to_string()),
+            }
+        };
+
+        TokenLiquidity {
+            address: mint.to_string(),
+            symbol: symbol.to_string(),
+            chain_id: 0,
+            top_liquidity,
+            pair_count: matching.len(),
+            top_pair,
+            sources: src,
+        }
+    }
+
     async fn fetch_coingecko(
         &self,
         platform: &str,

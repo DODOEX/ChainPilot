@@ -310,6 +310,26 @@ chainpilot swap history [--limit <N>] [--status pending|success|failed]
 
 ## `token` Subcommands
 
+### Non-EVM token support
+
+`token info`, `token price`, and `token liquidity` accept Solana SPL mints
+(base58 strings) in place of an EVM address. Detection is by address shape —
+SPL mints (32–44 base58 chars) and Bitcoin addresses (`bc1…`, `1…`, `3…`)
+are routed to dedicated paths. Symbol-only queries (e.g. `token info USDC`)
+continue to resolve against the active EVM `--chain-id` — to query Solana
+USDC, pass its mint: `chainpilot token info EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
+
+| Command | Solana | Bitcoin |
+|---|---|---|
+| `token info` | Jupiter (identity) + CoinGecko + DexScreener | not supported |
+| `token price` | CoinGecko `coins/solana/contract` + DexScreener | not supported |
+| `token liquidity` | DexScreener Solana pools | not supported |
+| `token risk` / `token contract` / create / mint / fee | EVM-only | not supported |
+
+JSON output for SPL queries reports `chain_id: 0` (sentinel for non-EVM)
+and `chain: "Solana"`. `token contract`, `token risk`, `token create`,
+`token mint`, and `token fee` remain EVM-only and reject non-EVM addresses.
+
 ### `token info`
 
 ```bash
