@@ -570,6 +570,36 @@ async fn contract(
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    // `token contract` reads EVM-specific surface (proxy detection, owner,
+    // implementation address). SPL mints and Bitcoin addresses have no
+    // matching concept, so short-circuit with a clear message rather than
+    // bubbling alloy/RPC errors.
+    match AddressRef::parse(&args.token) {
+        Ok(AddressRef::Svm(_)) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::TokenContract,
+            >(
+                Err(ChainError::Config(
+                    "token contract is not supported on Solana — SPL mints have no EVM-equivalent contract surface".to_string(),
+                )),
+                "token.contract",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+        Ok(AddressRef::Bvm(_)) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::TokenContract,
+            >(
+                Err(unsupported_token_on_bvm("token contract")),
+                "token.contract",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+        _ => {}
+    }
+
     let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
@@ -626,6 +656,37 @@ async fn add(
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    // The custom-token store is keyed by EVM (chain_id, address). SPL mints
+    // and Bitcoin addresses can't be persisted under that schema today, so
+    // reject early with a specific message rather than the generic
+    // "Invalid address" alloy returns.
+    match AddressRef::parse(&args.address) {
+        Ok(AddressRef::Svm(_)) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::CustomTokenRecord,
+            >(
+                Err(ChainError::Config(
+                    "token add is not supported on Solana — the custom token store is EVM-only"
+                        .to_string(),
+                )),
+                "token.add",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+        Ok(AddressRef::Bvm(_)) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::CustomTokenRecord,
+            >(
+                Err(unsupported_token_on_bvm("token add")),
+                "token.add",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+        _ => {}
+    }
+
     let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;

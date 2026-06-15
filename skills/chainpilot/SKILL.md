@@ -22,6 +22,40 @@ description: >
 ChainPilot is a Rust CLI for on-chain DeFi operations on EVM networks. It uses
 the DODO aggregator API for swap routing and `alloy` for RPC interaction.
 
+## Non-EVM (SVM / BVM) support matrix
+
+ChainPilot's read-only commands also work on Solana (SVM) and Bitcoin
+mainnet (BVM). Write-side commands (swap, approval, token create / mint /
+renounce) remain EVM-only by design. Use `solana` / `svm` and `bitcoin` /
+`bvm` as chain aliases for analytics; pass SPL mints or BTC addresses
+directly for token/wallet/risk queries — address shape decides routing.
+
+| Command | EVM | SVM (Solana) | BVM (Bitcoin) |
+|---|---|---|---|
+| `chain info/flows/stablecoins/protocols` | ✓ | ✓ DefiLlama | ✓ DefiLlama |
+| `protocol info/tvl/revenue/chains` | ✓ | ✓ DefiLlama | ✓ DefiLlama |
+| `wallet balance` | ✓ | ✓ Debank → Zerion | ✓ mempool.space |
+| `wallet overview` | ✓ | ✓ Debank → Zerion | ✓ derived from balance |
+| `wallet pnl` | ✓ | ✓ Zerion | ✗ no data source |
+| `wallet history` | ✓ | ✓ Zerion → Debank | ✓ mempool.space |
+| `wallet labels` | ✓ | ✓ Zerion (Dune is EVM-only) | ✗ no data source |
+| `wallet defi` | ✓ | ✓ Debank → Zerion | ✗ no data source |
+| `token info` | ✓ | ✓ Jupiter + CoinGecko + DexScreener | ✗ no metadata source |
+| `token price` | ✓ | ✓ CoinGecko + DexScreener | ✗ no metadata source |
+| `token liquidity` | ✓ | ✓ DexScreener | ✗ no metadata source |
+| `token risk` | ✓ GoPlus | ✓ GoPlus Solana (authority-based) | ✗ no metadata source |
+| `token contract / add / create / mint / fee / renounce` | ✓ | ✗ EVM-only | ✗ EVM-only |
+| `risk token` | ✓ | ✓ GoPlus Solana | ✗ no metadata source |
+| `risk wallet` | ✓ ETH balance heuristic | metadata-only | ✗ no data source |
+| `risk approval` | ✓ | ✗ EVM-only concept | ✗ EVM-only concept |
+| `swap *` | ✓ | ✗ EVM-only | ✗ EVM-only |
+
+For Solana wallet queries, **Debank is strongly recommended over Zerion** —
+Zerion's Solana indexing is asynchronous and may time out for cold wallets.
+On the `--chain-id` global flag: SVM/BVM ignore it (chain context comes
+from the address itself); EVM commands continue to require it for the
+target chain selection.
+
 ## Installation
 
 Before using ChainPilot, check if it is installed:
