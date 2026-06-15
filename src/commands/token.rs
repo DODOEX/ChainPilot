@@ -154,6 +154,30 @@ async fn price_svm(
     ))
 }
 
+async fn risk_svm(
+    mint: &str,
+    api: &ApiClients,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    let symbol = api
+        .jupiter
+        .token(mint)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| t.symbol)
+        .unwrap_or_default();
+    let risk = api.token_metadata.fetch_risk_svm(mint, &symbol).await;
+    Ok(crate::output::print_output::<
+        crate::models::token::TokenRisk,
+    >(
+        Ok(risk),
+        "token.risk",
+        output_mode,
+        OutputContext::new(0, false),
+    ))
+}
+
 async fn liquidity_svm(
     mint: &str,
     api: &ApiClients,
@@ -470,6 +494,21 @@ async fn risk(
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    match AddressRef::parse(&args.token) {
+        Ok(AddressRef::Svm(mint)) => return risk_svm(&mint, api, output_mode).await,
+        Ok(AddressRef::Bvm(_)) => {
+            return Ok(
+                crate::output::print_output::<crate::models::token::TokenRisk>(
+                    Err(unsupported_token_on_bvm("token risk")),
+                    "token.risk",
+                    output_mode,
+                    OutputContext::new(config.chain_id, false),
+                ),
+            );
+        }
+        _ => {}
+    }
+
     let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;

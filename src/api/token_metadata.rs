@@ -138,6 +138,44 @@ struct GoPlusResponse {
     result: Option<std::collections::HashMap<String, GoPlusTokenSecurity>>,
 }
 
+/// Subset of GoPlus's Solana `token_security` payload. Solana SPL tokens
+/// expose authority-based risk (mint authority, freeze authority, etc.)
+/// rather than the EVM honeypot/blacklist fields, so the schema is
+/// disjoint from [`GoPlusTokenSecurity`].
+#[derive(Debug, Deserialize)]
+struct GoPlusSvmResponse {
+    code: u64,
+    result: Option<std::collections::HashMap<String, GoPlusSvmTokenSecurity>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct GoPlusSvmTokenSecurity {
+    mintable: Option<GoPlusAuthority>,
+    freezable: Option<GoPlusAuthority>,
+    closable: Option<GoPlusAuthority>,
+    transfer_fee: Option<GoPlusTransferFee>,
+    transfer_hook: Option<Vec<serde_json::Value>>,
+    non_transferable: Option<String>,
+    trusted_token: Option<u8>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct GoPlusAuthority {
+    authority: Option<Vec<serde_json::Value>>,
+}
+
+impl GoPlusAuthority {
+    fn is_active(&self) -> bool {
+        self.authority.as_ref().is_some_and(|a| !a.is_empty())
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct GoPlusTransferFee {
+    #[serde(default)]
+    transfer_fee: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct GoPlusTokenSecurity {
     #[serde(rename = "is_honeypot")]
@@ -438,6 +476,120 @@ impl TokenMetadataClient {
         }
 
         risk
+    }
+
+    /// Solana-specific token risk via GoPlus. Returns a [`TokenRisk`] with
+    /// `chain_id = 0` (sentinel for non-EVM). When GoPlus has no entry for
+    /// the mint, returned fields stay `None` (rendered as `N/A`) so the
+    /// caller never has to invent fake "low risk" defaults.
+    pub async fn fetch_risk_svm(
+        &self,
+        mint: &str,
+        symbol: &str,
+    ) -> crate::models::token::TokenRisk {
+        use crate::models::token::{TokenRisk, TokenRiskSources};
+
+        let mut risk = TokenRisk {
+            address: mint.to_string(),
+            symbol: symbol.to_string(),
+            chain_id: 0,
+            risk_level: None,
+            risk_score: None,
+            honeypot: None,
+            blacklist: None,
+            transfer_restricted: None,
+            mintable: None,
+            owner_privileged: None,
+            tax_buy: None,
+            tax_sell: None,
+            sources: TokenRiskSources::default(),
+        };
+
+        let Some(data) = self.fetch_goplus_risk_svm(mint).await else {
+            return risk;
+        };
+
+        let src = "goplus".to_string();
+
+        let mintable = data.mintable.as_ref().map(GoPlusAuthority::is_active);
+        if let Some(v) = mintable {
+            risk.mintable = Some(v);
+            risk.sources.mintable = Some(src.clone());
+        }
+
+        // On Solana the "owner privilege" surface combines freeze and close
+        // authorities — either lets the issuer disrupt a holder.
+        let freezable = data.freezable.as_ref().is_some_and(GoPlusAuthority::is_active);
+        let closable = data.closable.as_ref().is_some_and(GoPlusAuthority::is_active);
+        let owner_privileged = freezable || closable;
+        risk.owner_privileged = Some(owner_privileged);
+        risk.sources.owner_privileged = Some(src.clone());
+
+        // Transfer-restricted: explicit non_transferable flag, an attached
+        // transfer hook program, or a non-zero transfer fee.
+        let non_transferable = data.non_transferable.as_deref() == Some("1");
+        let has_hook = data
+            .transfer_hook
+            .as_ref()
+            .is_some_and(|h| !h.is_empty());
+        let transfer_fee_pct = parse_percent(
+            data.transfer_fee
+                .as_ref()
+                .and_then(|f| f.transfer_fee.as_deref()),
+        );
+        let has_fee = transfer_fee_pct.is_some_and(|p| p > 0.0);
+        risk.transfer_restricted = Some(non_transferable || has_hook || has_fee);
+        risk.sources.transfer_restricted = Some(src.clone());
+
+        // Solana transfer fees apply symmetrically (no separate buy/sell), so
+        // mirror them into both fields when present.
+        if let Some(pct) = transfer_fee_pct {
+            risk.tax_buy = Some(pct);
+            risk.tax_sell = Some(pct);
+            risk.sources.tax_buy = Some(src.clone());
+            risk.sources.tax_sell = Some(src.clone());
+        }
+
+        // GoPlus's `trusted_token` (1 = on a curated list) is the closest
+        // SVM signal to "low risk overall". Without it, severity stays None
+        // so the user sees `N/A` rather than a guessed level.
+        let trusted = data.trusted_token == Some(1);
+        let level = if trusted && !mintable.unwrap_or(false) && !owner_privileged {
+            Some("low".to_string())
+        } else if has_fee || has_hook || non_transferable {
+            Some("high".to_string())
+        } else if mintable.unwrap_or(false) || owner_privileged {
+            Some("medium".to_string())
+        } else {
+            None
+        };
+        if let Some(l) = level {
+            risk.risk_level = Some(l);
+            risk.sources.risk_level = Some(src);
+        }
+
+        risk
+    }
+
+    async fn fetch_goplus_risk_svm(&self, mint: &str) -> Option<GoPlusSvmTokenSecurity> {
+        let url = "https://api.gopluslabs.io/api/v1/solana/token_security";
+        let resp = self
+            .client
+            .get(url)
+            .query(&[("contract_addresses", mint)])
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .ok()?;
+        let body_text = resp.text().await.ok()?;
+        let data: GoPlusSvmResponse = serde_json::from_str(&body_text).ok()?;
+        if data.code != 1 {
+            return None;
+        }
+        let result = data.result?;
+        // Solana mints are case-sensitive base58, but the result key is the
+        // mint itself — match exact first, fall through to any returned row.
+        result.get(mint).cloned().or_else(|| result.into_values().next())
     }
 
     async fn fetch_goplus_risk(&self, chain_id: u64, address: &str) -> Option<GoPlusTokenSecurity> {
@@ -1048,6 +1200,14 @@ fn apply_patch(info: &mut TokenInfo, patch: TokenMetadataPatch) {
     }
 
     info.sources = sources;
+}
+
+/// Parse a GoPlus percentage string. GoPlus returns fractions ("0.05" =
+/// 5%) for EVM and percentages ("5" = 5%) for Solana transfer fees — this
+/// only handles the percentage-string form used by Solana's `transfer_fee`,
+/// returning the value in percent.
+fn parse_percent(raw: Option<&str>) -> Option<f64> {
+    raw.and_then(|s| s.trim().parse::<f64>().ok())
 }
 
 fn coingecko_platform_id(chain_id: u64) -> Option<&'static str> {

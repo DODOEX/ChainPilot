@@ -324,11 +324,19 @@ USDC, pass its mint: `chainpilot token info EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGk
 | `token info` | Jupiter (identity) + CoinGecko + DexScreener | not supported |
 | `token price` | CoinGecko `coins/solana/contract` + DexScreener | not supported |
 | `token liquidity` | DexScreener Solana pools | not supported |
-| `token risk` / `token contract` / create / mint / fee | EVM-only | not supported |
+| `token risk` | GoPlus Solana token_security (authority-based) | not supported |
+| `token contract` / create / mint / fee | EVM-only | not supported |
 
 JSON output for SPL queries reports `chain_id: 0` (sentinel for non-EVM)
-and `chain: "Solana"`. `token contract`, `token risk`, `token create`,
-`token mint`, and `token fee` remain EVM-only and reject non-EVM addresses.
+and `chain: "Solana"`. `token contract`, `token create`, `token mint`, and
+`token fee` remain EVM-only and reject non-EVM addresses.
+
+`token risk` on Solana uses authority-based signals — mint authority,
+freeze/close authority, transfer fee, transfer hook, non-transferable —
+in place of the EVM honeypot/blacklist fields. `risk_level` collapses to
+`high` when transfer is fee-charged, hook-restricted, or
+non-transferable; `medium` when any authority is active; `low` only when
+GoPlus flags the mint as a `trusted_token` and no authority is active.
 
 ### `token info`
 
@@ -696,6 +704,17 @@ primary source with per-portfolio-item extraction, Zerion is the fallback).
 ---
 
 ## `risk` Subcommands
+
+### Non-EVM risk support
+
+| Command | Solana | Bitcoin |
+|---|---|---|
+| `risk token` | GoPlus Solana token_security | not supported |
+| `risk wallet` | metadata-only report (no behavioral signals) | not supported |
+| `risk approval` | not supported (SPL uses delegate accounts) | not supported (no approval primitive) |
+
+`risk approval` is rejected when **either** owner or spender is a non-EVM
+address; the message names which side triggered the rejection.
 
 ### `risk token`
 
