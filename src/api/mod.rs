@@ -4,6 +4,7 @@ mod defillama;
 mod dodo;
 mod dune;
 mod goldrush;
+mod mempool;
 mod token_metadata;
 mod zerion;
 
@@ -13,6 +14,11 @@ pub use defillama::DefillamaClient;
 pub use dodo::DodoClient;
 pub use dune::DuneClient;
 pub use goldrush::{GoldrushAssetRecord, GoldrushChainBalance, GoldrushClient};
+// BitcoinBalance / BitcoinTx are exposed via MempoolClient methods directly;
+// re-export them so future callers outside wallet.rs can name the types
+// without paying the warning tax today.
+#[allow(unused_imports)]
+pub use mempool::{BitcoinBalance, BitcoinTx, MempoolClient, DEFAULT_MEMPOOL_API_URL};
 pub use token_metadata::TokenMetadataClient;
 pub use zerion::{ZerionChainBalance, ZerionClient, ZerionPortfolio, ZerionPositionRecord};
 
@@ -92,6 +98,7 @@ pub struct ApiClients {
     pub dune: DuneClient,
     pub defillama: DefillamaClient,
     pub chain: ChainClient,
+    pub mempool: MempoolClient,
 }
 
 impl ApiClients {
@@ -139,13 +146,14 @@ impl ApiClients {
             dune: DuneClient::new(client.clone(), &config.dune_api_url, &config.dune_api_key),
             defillama: DefillamaClient::new(client.clone(), crate::config::DEFAULT_DEFILLAMA_API_URL),
             chain: ChainClient::new(
-                client,
+                client.clone(),
                 crate::config::DEFAULT_DEFILLAMA_API_URL,
                 crate::config::DEFAULT_DEFILLAMA_STABLECOINS_API_URL,
                 crate::config::DEFAULT_GROWTHEPIE_API_URL,
                 &config.coingecko_api_url,
                 config.coingecko_api_key.clone(),
             ),
+            mempool: MempoolClient::new(client, DEFAULT_MEMPOOL_API_URL),
         })
     }
 }

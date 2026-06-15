@@ -495,7 +495,27 @@ Without any aggregator key, `wallet balance` falls through to on-chain
 single-chain native balance and `wallet overview` errors out.
 
 The `sources` field in the JSON response records which provider supplied
-each value (`"debank"`, `"zerion"`, `"goldrush"`, `"onchain"`, or `null`).
+each value (`"debank"`, `"zerion"`, `"goldrush"`, `"onchain"`,
+`"mempool.space"`, or `null`).
+
+### Non-EVM wallet support
+
+`wallet` commands also accept Solana base58 pubkeys and Bitcoin mainnet
+addresses (Bech32 `bc1…`, legacy `1…` / `3…`):
+
+| Command | Solana (SVM) | Bitcoin (BVM) |
+|---|---|---|
+| `balance` | Debank → Zerion | mempool.space + CoinGecko price |
+| `overview` | Debank → Zerion | derived from balance (single asset) |
+| `pnl` | Zerion | not supported |
+| `history` | Zerion → Debank | mempool.space |
+| `labels` | Zerion only (Dune is EVM-only) | not supported |
+| `defi` | Debank → Zerion | not supported |
+
+For Solana, **Debank is strongly recommended** — Zerion's Solana support is
+indexed asynchronously and may time out for cold/inactive addresses.
+Goldrush and the on-chain RPC fallback are EVM-only and skipped for SVM/BVM.
+`--chain-id` does not apply to SVM or BVM lookups.
 
 ### `--chain-id` semantics
 
@@ -732,6 +752,14 @@ from free public sources (DefiLlama, CoinGecko, growthepie) — no API key requi
 Every field is rendered with a `Source` column (or `sources` object in `--json`)
 naming its data origin; fields with no available source show `N/A`.
 
+**Non-EVM coverage**: The `chain` subcommands also work for non-EVM chains via
+DefiLlama. Use `solana` / `sol` / `svm` for Solana and `bitcoin` / `btc` / `bvm`
+for Bitcoin mainnet. Only the `chain` subtree supports these — every other
+subcommand (`swap`, `token`, `wallet`, `risk`, `protocol info`) assumes an EVM
+address space and will reject Solana / Bitcoin addresses. growthepie activity
+metrics (active addresses, tx count, throughput) are EVM-only and surface as
+`N/A` on Solana / Bitcoin.
+
 ### `chain info`
 
 ```bash
@@ -821,6 +849,11 @@ confirm with the user before using any candidate address in a swap or approval.
 | Sepolia Testnet | 11155111 |
 
 For unsupported chain IDs, pass `--rpc-url` manually.
+
+**Non-EVM analytics**: `chain` subcommands (and `protocol info/tvl/revenue/chains`)
+additionally accept `solana` / `svm` and `bitcoin` / `bvm` — read-only via
+DefiLlama. No `--chain-id` value applies for these; the chain name is the
+argument to the `chain` subcommand itself.
 
 ---
 

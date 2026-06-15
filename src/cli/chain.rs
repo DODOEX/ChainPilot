@@ -21,13 +21,13 @@ pub enum ChainAction {
 
 #[derive(Args)]
 pub struct ChainArgs {
-    /// Chain name (e.g. ethereum, base, arbitrum, bsc)
+    /// Chain name (e.g. ethereum, base, arbitrum, bsc, solana/svm, bitcoin/bvm)
     pub chain: String,
 }
 
 #[derive(Args)]
 pub struct ChainProtocolsArgs {
-    /// Chain name (e.g. ethereum, base, arbitrum, bsc)
+    /// Chain name (e.g. ethereum, base, arbitrum, bsc, solana/svm, bitcoin/bvm)
     pub chain: String,
 
     /// Maximum number of protocols to return (default 20, max 100)
