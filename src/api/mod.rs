@@ -22,7 +22,7 @@ pub use jupiter::{JupiterClient, JupiterToken, DEFAULT_JUPITER_API_URL};
 // without paying the warning tax today.
 #[allow(unused_imports)]
 pub use mempool::{BitcoinBalance, BitcoinTx, MempoolClient, DEFAULT_MEMPOOL_API_URL};
-pub use token_metadata::TokenMetadataClient;
+pub use token_metadata::{AddressSecurity, TokenMetadataClient};
 pub use zerion::{ZerionChainBalance, ZerionClient, ZerionPortfolio, ZerionPositionRecord};
 
 use crate::config::AppConfig;

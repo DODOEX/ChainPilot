@@ -27,7 +27,7 @@ pub async fn handle(
 ) -> Result<ExitCode> {
     match cmd.action {
         RiskAction::Token(args) => token_risk(args, api, config, store, output_mode).await,
-        RiskAction::Wallet(args) => wallet_risk(args, config, output_mode).await,
+        RiskAction::Wallet(args) => wallet_risk(args, api, config, output_mode).await,
         RiskAction::Approval(args) => approval_risk(args, api, config, store, output_mode).await,
     }
 }
@@ -206,6 +206,7 @@ async fn token_risk_svm(
 
 async fn wallet_risk(
     args: crate::cli::risk::WalletRiskArgs,
+    api: &ApiClients,
     config: &AppConfig,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
@@ -213,7 +214,7 @@ async fn wallet_risk(
     let ctx = OutputContext::new(chain_id, false);
 
     match AddressRef::parse(&args.address) {
-        Ok(AddressRef::Svm(_)) => return wallet_risk_svm(&args.address, output_mode).await,
+        Ok(AddressRef::Svm(_)) => return wallet_risk_svm(&args.address, api, output_mode).await,
         Ok(AddressRef::Bvm(_)) => {
             return Ok(crate::output::print_output::<RiskReport>(
                 Err(unsupported_on("Bitcoin mainnet", "risk wallet")),
@@ -259,7 +260,7 @@ async fn wallet_risk(
         }
     };
 
-    let overall_risk = if eth_balance_display < 0.01 {
+    let balance_level = if eth_balance_display < 0.01 {
         RiskLevel::High
     } else if eth_balance_display < 0.1 {
         RiskLevel::Medium
@@ -267,14 +268,33 @@ async fn wallet_risk(
         RiskLevel::Low
     };
 
+    // Augment the native-balance heuristic with GoPlus address reputation
+    // (sanctions, phishing, drainer, mixer, …). `Some(chain_id)` scopes the
+    // lookup to this EVM chain; `None` when GoPlus has no record.
+    let reputation = api
+        .token_metadata
+        .fetch_address_security(&args.address, Some(chain_id))
+        .await;
+    let signals = reputation
+        .as_ref()
+        .map(address_reputation_signals)
+        .unwrap_or_default();
+
+    // Overall is the more severe of the balance heuristic and any reputation
+    // signal, so a funded-but-flagged wallet isn't mislabeled `LOW`.
+    let overall_risk =
+        std::cmp::max_by_key(balance_level, overall_from_signals(&signals), severity_rank);
+
     let report = RiskReport {
         subject: args.address.clone(),
         subject_type: "wallet".to_string(),
         overall_risk,
-        signals: vec![],
+        signals,
         metadata: serde_json::json!({
             "eth_balance": eth_balance_raw,
             "eth_balance_display": eth_balance_display,
+            "reputation_source": reputation.as_ref().map(|_| "goplus"),
+            "flagged": reputation.as_ref().map(|r| !r.is_clean()),
         }),
         analyzed_at: Utc::now(),
     };
@@ -287,29 +307,181 @@ async fn wallet_risk(
     ))
 }
 
-/// SVM wallet risk: GoPlus and other providers don't index per-address
-/// behavioral risk on Solana the way they do on EVM, and the EVM "ETH
-/// balance < 0.01" heuristic doesn't translate. We return a low-severity
-/// report with no signals plus an informational metadata field so the
-/// command stays callable without inventing fake signals.
-async fn wallet_risk_svm(address: &str, output_mode: OutputMode) -> Result<ExitCode> {
-    let report = RiskReport {
-        subject: address.to_string(),
-        subject_type: "wallet".to_string(),
-        overall_risk: RiskLevel::Low,
-        signals: vec![],
-        metadata: serde_json::json!({
-            "chain": "Solana",
-            "note": "wallet risk on Solana is metadata-only; no behavioral signals available",
-        }),
-        analyzed_at: Utc::now(),
+/// SVM wallet risk: GoPlus's malicious-address library is chain-agnostic, so
+/// it flags Solana addresses it has seen tied to sanctions, phishing, drainer
+/// (stealing) attacks, mixers, etc. We map those reputation flags to signals.
+/// The EVM "ETH balance < 0.01" heuristic doesn't translate and is dropped.
+/// When GoPlus has no record (or the request fails) we still return a callable
+/// low-severity report rather than erroring.
+async fn wallet_risk_svm(
+    address: &str,
+    api: &ApiClients,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    // `None` chain_id: the malicious-address library keys on the raw address,
+    // so a Solana base58 pubkey resolves without an EVM chain context.
+    let security = api.token_metadata.fetch_address_security(address, None).await;
+
+    let report = match &security {
+        Some(sec) => {
+            let signals = address_reputation_signals(sec);
+            let overall_risk = overall_from_signals(&signals);
+            RiskReport {
+                subject: address.to_string(),
+                subject_type: "wallet".to_string(),
+                overall_risk,
+                signals,
+                metadata: serde_json::json!({
+                    "chain": "Solana",
+                    "source": "goplus",
+                    "flagged": !sec.is_clean(),
+                }),
+                analyzed_at: Utc::now(),
+            }
+        }
+        None => RiskReport {
+            subject: address.to_string(),
+            subject_type: "wallet".to_string(),
+            overall_risk: RiskLevel::Low,
+            signals: vec![],
+            metadata: serde_json::json!({
+                "chain": "Solana",
+                "source": "goplus",
+                "note": "GoPlus has no malicious-address record for this address",
+            }),
+            analyzed_at: Utc::now(),
+        },
     };
+
     Ok(crate::output::print_output::<RiskReport>(
         Ok(report),
         "risk.wallet",
         output_mode,
         OutputContext::new(0, false),
     ))
+}
+
+/// Numeric rank for picking the most severe level across signals. `RiskLevel`
+/// intentionally doesn't derive `Ord` (its serialization is the contract), so
+/// we rank explicitly here.
+fn severity_rank(level: &RiskLevel) -> u8 {
+    match level {
+        RiskLevel::Low => 0,
+        RiskLevel::Medium => 1,
+        RiskLevel::High => 2,
+        RiskLevel::Critical => 3,
+    }
+}
+
+/// Overall risk is the highest-severity signal present, or `Low` when the
+/// address is clean (GoPlus had a record but flagged nothing).
+fn overall_from_signals(signals: &[RiskSignal]) -> RiskLevel {
+    signals
+        .iter()
+        .max_by_key(|s| severity_rank(&s.severity))
+        .map(|s| s.severity.clone())
+        .unwrap_or(RiskLevel::Low)
+}
+
+/// Map GoPlus address-reputation flags to risk signals. Chain-neutral (the
+/// malicious-address library is keyed on the raw address), so it serves both
+/// EVM and SVM wallet risk. Pure (no I/O) so the severity classification is
+/// unit-testable. Sanctions, theft/drainer, and honeypot ties are treated as
+/// the gravest; financial-crime categories as high; softer suspicions (fake
+/// KYC, generic blacklist doubt) as medium.
+fn address_reputation_signals(sec: &crate::api::AddressSecurity) -> Vec<RiskSignal> {
+    // (flag, signal id, description, severity)
+    let table: &[(bool, &str, &str, RiskLevel)] = &[
+        (
+            sec.sanctioned,
+            "sanctioned",
+            "Address appears on a sanctions list",
+            RiskLevel::Critical,
+        ),
+        (
+            sec.stealing_attack,
+            "stealing_attack",
+            "Address is associated with token-stealing (drainer) attacks",
+            RiskLevel::Critical,
+        ),
+        (
+            sec.honeypot_related_address,
+            "honeypot_related_address",
+            "Address is linked to honeypot tokens",
+            RiskLevel::Critical,
+        ),
+        (
+            sec.phishing_activities,
+            "phishing_activities",
+            "Address has been involved in phishing activities",
+            RiskLevel::High,
+        ),
+        (
+            sec.blackmail_activities,
+            "blackmail_activities",
+            "Address has been involved in blackmail activities",
+            RiskLevel::High,
+        ),
+        (
+            sec.cybercrime,
+            "cybercrime",
+            "Address is associated with cybercrime",
+            RiskLevel::High,
+        ),
+        (
+            sec.money_laundering,
+            "money_laundering",
+            "Address is associated with money laundering",
+            RiskLevel::High,
+        ),
+        (
+            sec.financial_crime,
+            "financial_crime",
+            "Address is associated with financial crime",
+            RiskLevel::High,
+        ),
+        (
+            sec.darkweb_transactions,
+            "darkweb_transactions",
+            "Address has transacted with darkweb services",
+            RiskLevel::High,
+        ),
+        (
+            sec.malicious_mining_activities,
+            "malicious_mining_activities",
+            "Address is associated with malicious mining activities",
+            RiskLevel::High,
+        ),
+        (
+            sec.mixer,
+            "mixer",
+            "Address is associated with a coin mixer",
+            RiskLevel::High,
+        ),
+        (
+            sec.fake_kyc,
+            "fake_kyc",
+            "Address is associated with fake KYC",
+            RiskLevel::Medium,
+        ),
+        (
+            sec.blacklist_doubt,
+            "blacklist_doubt",
+            "Address is suspected of malicious behavior (blacklist doubt)",
+            RiskLevel::Medium,
+        ),
+    ];
+
+    table
+        .iter()
+        .filter(|(flagged, _, _, _)| *flagged)
+        .map(|(_, id, desc, sev)| RiskSignal {
+            signal: (*id).to_string(),
+            description: (*desc).to_string(),
+            severity: sev.clone(),
+            value: serde_json::json!({ "flagged": true }),
+        })
+        .collect()
 }
 
 async fn approval_risk(
@@ -459,4 +631,54 @@ async fn approval_risk(
         output_mode,
         OutputContext::new(chain_id, false),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::AddressSecurity;
+
+    #[test]
+    fn severity_rank_is_monotonic() {
+        // The EVM path merges balance level and reputation level via
+        // `max_by_key(severity_rank)`, so this ordering is load-bearing.
+        assert!(severity_rank(&RiskLevel::Low) < severity_rank(&RiskLevel::Medium));
+        assert!(severity_rank(&RiskLevel::Medium) < severity_rank(&RiskLevel::High));
+        assert!(severity_rank(&RiskLevel::High) < severity_rank(&RiskLevel::Critical));
+    }
+
+    #[test]
+    fn clean_address_has_no_signals_and_low_overall() {
+        let sec = AddressSecurity::default();
+        let signals = address_reputation_signals(&sec);
+        assert!(signals.is_empty());
+        assert!(sec.is_clean());
+        assert!(matches!(overall_from_signals(&signals), RiskLevel::Low));
+    }
+
+    #[test]
+    fn sanctioned_address_is_critical() {
+        let sec = AddressSecurity {
+            sanctioned: true,
+            ..Default::default()
+        };
+        let signals = address_reputation_signals(&sec);
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].signal, "sanctioned");
+        assert!(!sec.is_clean());
+        assert!(matches!(overall_from_signals(&signals), RiskLevel::Critical));
+    }
+
+    #[test]
+    fn overall_picks_highest_severity_across_mixed_flags() {
+        // phishing (High) + fake_kyc (Medium) -> overall High.
+        let sec = AddressSecurity {
+            phishing_activities: true,
+            fake_kyc: true,
+            ..Default::default()
+        };
+        let signals = address_reputation_signals(&sec);
+        assert_eq!(signals.len(), 2);
+        assert!(matches!(overall_from_signals(&signals), RiskLevel::High));
+    }
 }

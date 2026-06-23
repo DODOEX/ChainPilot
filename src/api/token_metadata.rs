@@ -196,6 +196,91 @@ struct GoPlusTokenSecurity {
     trust_list: Option<String>,
 }
 
+/// Address-reputation flags from GoPlus's malicious-address library. The
+/// library is keyed on the raw address string and is largely chain-agnostic,
+/// so it covers non-EVM addresses (e.g. Solana base58) that GoPlus has seen
+/// flagged. Each field is `true` only when GoPlus returns `"1"`.
+#[derive(Clone, Debug, Default)]
+pub struct AddressSecurity {
+    pub sanctioned: bool,
+    pub phishing_activities: bool,
+    pub stealing_attack: bool,
+    pub blackmail_activities: bool,
+    pub cybercrime: bool,
+    pub money_laundering: bool,
+    pub financial_crime: bool,
+    pub darkweb_transactions: bool,
+    pub fake_kyc: bool,
+    pub malicious_mining_activities: bool,
+    pub honeypot_related_address: bool,
+    pub blacklist_doubt: bool,
+    pub mixer: bool,
+}
+
+impl AddressSecurity {
+    /// True when GoPlus returned no risk flags for the address — i.e. it has a
+    /// record but nothing adverse. Lets callers distinguish "clean" from the
+    /// `None` case (no record / request failed).
+    pub fn is_clean(&self) -> bool {
+        !(self.sanctioned
+            || self.phishing_activities
+            || self.stealing_attack
+            || self.blackmail_activities
+            || self.cybercrime
+            || self.money_laundering
+            || self.financial_crime
+            || self.darkweb_transactions
+            || self.fake_kyc
+            || self.malicious_mining_activities
+            || self.honeypot_related_address
+            || self.blacklist_doubt
+            || self.mixer)
+    }
+}
+
+/// GoPlus `address_security` returns a flat `result` object (unlike
+/// `token_security`, which keys results by contract address).
+#[derive(Debug, Deserialize)]
+struct GoPlusAddressSecurityResponse {
+    code: u64,
+    result: Option<GoPlusAddressSecurityRaw>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct GoPlusAddressSecurityRaw {
+    #[serde(default)]
+    sanctioned: Option<String>,
+    #[serde(default)]
+    phishing_activities: Option<String>,
+    #[serde(default)]
+    stealing_attack: Option<String>,
+    #[serde(default)]
+    blackmail_activities: Option<String>,
+    #[serde(default)]
+    cybercrime: Option<String>,
+    #[serde(default)]
+    money_laundering: Option<String>,
+    #[serde(default)]
+    financial_crime: Option<String>,
+    #[serde(default)]
+    darkweb_transactions: Option<String>,
+    #[serde(default)]
+    fake_kyc: Option<String>,
+    #[serde(default)]
+    malicious_mining_activities: Option<String>,
+    #[serde(default)]
+    honeypot_related_address: Option<String>,
+    #[serde(default)]
+    blacklist_doubt: Option<String>,
+    #[serde(default)]
+    mixer: Option<String>,
+}
+
+/// GoPlus encodes booleans as the strings `"1"` (true) / `"0"` (false).
+fn goplus_flag(value: &Option<String>) -> bool {
+    value.as_deref() == Some("1")
+}
+
 impl TokenMetadataClient {
     pub fn new(client: Client, config: &AppConfig) -> Self {
         Self {
@@ -569,6 +654,45 @@ impl TokenMetadataClient {
         }
 
         risk
+    }
+
+    /// Fetch GoPlus address-reputation flags for a wallet address. `chain_id`
+    /// scopes EVM lookups (and lets GoPlus resolve the `contract_address`
+    /// field); pass `None` for non-EVM addresses such as Solana, where the
+    /// malicious-address library is keyed on the raw address string. Returns
+    /// `None` when GoPlus has no record for the address or the request fails.
+    pub async fn fetch_address_security(
+        &self,
+        address: &str,
+        chain_id: Option<u64>,
+    ) -> Option<AddressSecurity> {
+        let url = format!("https://api.gopluslabs.io/api/v1/address_security/{address}");
+        let mut req = self.client.get(&url).timeout(Duration::from_secs(10));
+        if let Some(id) = chain_id {
+            req = req.query(&[("chain_id", id.to_string())]);
+        }
+        let resp = req.send().await.ok()?;
+        let body_text = resp.text().await.ok()?;
+        let data: GoPlusAddressSecurityResponse = serde_json::from_str(&body_text).ok()?;
+        if data.code != 1 {
+            return None;
+        }
+        let raw = data.result?;
+        Some(AddressSecurity {
+            sanctioned: goplus_flag(&raw.sanctioned),
+            phishing_activities: goplus_flag(&raw.phishing_activities),
+            stealing_attack: goplus_flag(&raw.stealing_attack),
+            blackmail_activities: goplus_flag(&raw.blackmail_activities),
+            cybercrime: goplus_flag(&raw.cybercrime),
+            money_laundering: goplus_flag(&raw.money_laundering),
+            financial_crime: goplus_flag(&raw.financial_crime),
+            darkweb_transactions: goplus_flag(&raw.darkweb_transactions),
+            fake_kyc: goplus_flag(&raw.fake_kyc),
+            malicious_mining_activities: goplus_flag(&raw.malicious_mining_activities),
+            honeypot_related_address: goplus_flag(&raw.honeypot_related_address),
+            blacklist_doubt: goplus_flag(&raw.blacklist_doubt),
+            mixer: goplus_flag(&raw.mixer),
+        })
     }
 
     async fn fetch_goplus_risk_svm(&self, mint: &str) -> Option<GoPlusSvmTokenSecurity> {
