@@ -38,7 +38,7 @@ directly for token/wallet/risk queries — address shape decides routing.
 | `wallet overview` | ✓ | ✓ Debank → Zerion | ✓ derived from balance |
 | `wallet pnl` | ✓ | ✓ Zerion | ✗ no data source |
 | `wallet history` | ✓ | ✓ Zerion → Debank | ✓ mempool.space |
-| `wallet labels` | ✓ | ✓ Zerion (Dune is EVM-only) | ✗ no data source |
+| `wallet labels` | ✓ | ✓ Zerion (Dune is EVM-only) | ✗ not integrated¹ |
 | `wallet defi` | ✓ | ✓ Debank → Zerion | ✗ no data source |
 | `token info` | ✓ | ✓ Jupiter + CoinGecko + DexScreener | ✗ no metadata source |
 | `token price` | ✓ | ✓ CoinGecko + DexScreener | ✗ no metadata source |
@@ -46,7 +46,7 @@ directly for token/wallet/risk queries — address shape decides routing.
 | `token risk` | ✓ GoPlus | ✓ GoPlus Solana (authority-based) | ✗ no metadata source |
 | `token contract / add / create / mint / fee / renounce` | ✓ | ✗ EVM-only | ✗ EVM-only |
 | `risk token` | ✓ | ✓ GoPlus Solana | ✗ no metadata source |
-| `risk wallet` | ✓ ETH balance heuristic | metadata-only | ✗ no data source |
+| `risk wallet` | ✓ ETH balance + GoPlus address reputation | ✓ GoPlus address reputation | ✗ no data source |
 | `risk approval` | ✓ | ✗ EVM-only concept | ✗ EVM-only concept |
 | `swap *` | ✓ | ✗ EVM-only | ✗ EVM-only |
 
@@ -55,6 +55,12 @@ Zerion's Solana indexing is asynchronous and may time out for cold wallets.
 On the `--chain-id` global flag: SVM/BVM ignore it (chain context comes
 from the address itself); EVM commands continue to require it for the
 target chain selection.
+
+¹ Bitcoin entity labels are not integrated. The integrated provider
+(mempool.space) returns raw on-chain data only — no attribution. Sources that
+do cover BTC labels (Breadcrumbs, MetaSleuth, Arkham, Chainalysis) all require
+a new client and a paid/keyed API, and BTC isn't a DODO trading target, so
+this is deferred rather than impossible.
 
 ## Installation
 
@@ -571,7 +577,7 @@ addresses (Bech32 `bc1…`, legacy `1…` / `3…`):
 | `overview` | Debank → Zerion | derived from balance (single asset) |
 | `pnl` | Zerion | not supported |
 | `history` | Zerion → Debank | mempool.space |
-| `labels` | Zerion only (Dune is EVM-only) | not supported |
+| `labels` | Zerion only (Dune is EVM-only) | not integrated (Breadcrumbs/MetaSleuth/Arkham exist, paid/keyed) |
 | `defi` | Debank → Zerion | not supported |
 
 For Solana, **Debank is strongly recommended** — Zerion's Solana support is
@@ -744,7 +750,7 @@ primary source with per-portfolio-item extraction, Zerion is the fallback).
 | Command | Solana | Bitcoin |
 |---|---|---|
 | `risk token` | GoPlus Solana token_security | not supported |
-| `risk wallet` | metadata-only report (no behavioral signals) | not supported |
+| `risk wallet` | GoPlus address-reputation flags (sanctions, phishing, drainer, mixer, …) | not supported |
 | `risk approval` | not supported (SPL uses delegate accounts) | not supported (no approval primitive) |
 
 `risk approval` is rejected when **either** owner or spender is a non-EVM
@@ -764,7 +770,15 @@ Token risk: honeypot detection, ownership, liquidity flags.
 chainpilot risk wallet <ADDRESS>
 ```
 
-Wallet risk: exposure summary, high-risk approvals.
+Wallet risk: exposure summary, high-risk approvals. On EVM it combines a
+native-balance heuristic with GoPlus's malicious-address reputation, taking
+the more severe of the two as the overall level. On Solana (base58 address)
+it relies on the same chain-agnostic GoPlus library. Either way it emits one
+signal per flagged category (sanctions, phishing, stealing/drainer, mixer,
+etc.); when GoPlus has no record, EVM falls back to the balance level and SVM
+returns `LOW` with an explanatory note. Note GoPlus's reputation coverage is
+best-effort — a `LOW`/clean result means "not flagged", not "proven safe"
+(e.g. some OFAC-sanctioned contracts are not marked `sanctioned`).
 
 ### `risk approval`
 
