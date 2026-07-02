@@ -243,7 +243,11 @@ impl AddressSecurity {
 #[derive(Debug, Deserialize)]
 struct GoPlusAddressSecurityResponse {
     code: u64,
-    result: Option<GoPlusAddressSecurityRaw>,
+    // Kept as a raw `Value` so we can defensively verify the shape before
+    // trusting it: deserializing a keyed map (e.g. a future schema change to
+    // `{ "<addr>": {...} }`) straight into the flat struct would silently
+    // yield all-`None` (an unflagged / "clean" result), a false negative.
+    result: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -279,6 +283,42 @@ struct GoPlusAddressSecurityRaw {
 /// GoPlus encodes booleans as the strings `"1"` (true) / `"0"` (false).
 fn goplus_flag(value: &Option<String>) -> bool {
     value.as_deref() == Some("1")
+}
+
+/// Parse a GoPlus `address_security` response body into [`AddressSecurity`].
+/// Pure (no I/O) so the shape guard is unit-testable. Returns `None` when the
+/// request wasn't a success (`code != 1`), there's no `result`, or the result
+/// isn't the expected flat reputation object — the last case guards against a
+/// schema drift silently reading as a false "clean".
+fn parse_address_security(body_text: &str) -> Option<AddressSecurity> {
+    let data: GoPlusAddressSecurityResponse = serde_json::from_str(body_text).ok()?;
+    if data.code != 1 {
+        return None;
+    }
+    let result = data.result?;
+    // The flat reputation object must actually carry a known flag key. A keyed
+    // map (`{ "<addr>": {...} }`) or renamed schema fails this check and is
+    // treated as "no record" (`None`) rather than an unflagged address.
+    let obj = result.as_object()?;
+    if !obj.contains_key("sanctioned") && !obj.contains_key("phishing_activities") {
+        return None;
+    }
+    let raw: GoPlusAddressSecurityRaw = serde_json::from_value(result).ok()?;
+    Some(AddressSecurity {
+        sanctioned: goplus_flag(&raw.sanctioned),
+        phishing_activities: goplus_flag(&raw.phishing_activities),
+        stealing_attack: goplus_flag(&raw.stealing_attack),
+        blackmail_activities: goplus_flag(&raw.blackmail_activities),
+        cybercrime: goplus_flag(&raw.cybercrime),
+        money_laundering: goplus_flag(&raw.money_laundering),
+        financial_crime: goplus_flag(&raw.financial_crime),
+        darkweb_transactions: goplus_flag(&raw.darkweb_transactions),
+        fake_kyc: goplus_flag(&raw.fake_kyc),
+        malicious_mining_activities: goplus_flag(&raw.malicious_mining_activities),
+        honeypot_related_address: goplus_flag(&raw.honeypot_related_address),
+        blacklist_doubt: goplus_flag(&raw.blacklist_doubt),
+        mixer: goplus_flag(&raw.mixer),
+    })
 }
 
 impl TokenMetadataClient {
@@ -673,26 +713,7 @@ impl TokenMetadataClient {
         }
         let resp = req.send().await.ok()?;
         let body_text = resp.text().await.ok()?;
-        let data: GoPlusAddressSecurityResponse = serde_json::from_str(&body_text).ok()?;
-        if data.code != 1 {
-            return None;
-        }
-        let raw = data.result?;
-        Some(AddressSecurity {
-            sanctioned: goplus_flag(&raw.sanctioned),
-            phishing_activities: goplus_flag(&raw.phishing_activities),
-            stealing_attack: goplus_flag(&raw.stealing_attack),
-            blackmail_activities: goplus_flag(&raw.blackmail_activities),
-            cybercrime: goplus_flag(&raw.cybercrime),
-            money_laundering: goplus_flag(&raw.money_laundering),
-            financial_crime: goplus_flag(&raw.financial_crime),
-            darkweb_transactions: goplus_flag(&raw.darkweb_transactions),
-            fake_kyc: goplus_flag(&raw.fake_kyc),
-            malicious_mining_activities: goplus_flag(&raw.malicious_mining_activities),
-            honeypot_related_address: goplus_flag(&raw.honeypot_related_address),
-            blacklist_doubt: goplus_flag(&raw.blacklist_doubt),
-            mixer: goplus_flag(&raw.mixer),
-        })
+        parse_address_security(&body_text)
     }
 
     async fn fetch_goplus_risk_svm(&self, mint: &str) -> Option<GoPlusSvmTokenSecurity> {
@@ -1489,6 +1510,39 @@ fn liquidity_usd(pair: &DexScreenerPair) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_address_security_reads_flat_flags() {
+        let body = r#"{"code":1,"message":"ok","result":{
+            "sanctioned":"1","phishing_activities":"0","stealing_attack":"1",
+            "cybercrime":"0","mixer":"0"}}"#;
+        let sec = parse_address_security(body).expect("flat result should parse");
+        assert!(sec.sanctioned);
+        assert!(sec.stealing_attack);
+        assert!(!sec.phishing_activities);
+        assert!(!sec.is_clean());
+    }
+
+    #[test]
+    fn parse_address_security_clean_when_all_zero() {
+        let body = r#"{"code":1,"result":{"sanctioned":"0","phishing_activities":"0"}}"#;
+        let sec = parse_address_security(body).expect("should parse");
+        assert!(sec.is_clean());
+    }
+
+    #[test]
+    fn parse_address_security_rejects_non_success_code() {
+        let body = r#"{"code":0,"message":"error","result":{"sanctioned":"1"}}"#;
+        assert!(parse_address_security(body).is_none());
+    }
+
+    #[test]
+    fn parse_address_security_rejects_keyed_map_shape() {
+        // Schema-drift guard: a result keyed by address must NOT read as a
+        // clean/unflagged address (which would be a false negative).
+        let body = r#"{"code":1,"result":{"0xabc":{"sanctioned":"1"}}}"#;
+        assert!(parse_address_security(body).is_none());
+    }
 
     #[test]
     fn coingecko_platform_id_maps_supported_chains() {

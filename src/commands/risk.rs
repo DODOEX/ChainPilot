@@ -275,15 +275,26 @@ async fn wallet_risk(
         .token_metadata
         .fetch_address_security(&args.address, Some(chain_id))
         .await;
-    let signals = reputation
+    let mut signals = reputation
         .as_ref()
         .map(address_reputation_signals)
         .unwrap_or_default();
 
-    // Overall is the more severe of the balance heuristic and any reputation
-    // signal, so a funded-but-flagged wallet isn't mislabeled `LOW`.
-    let overall_risk =
-        std::cmp::max_by_key(balance_level, overall_from_signals(&signals), severity_rank);
+    // Surface the balance heuristic as an explicit signal (rather than folding
+    // it opaquely into `overall`) so the caller sees *why* a bare wallet is
+    // flagged. Overall is then just the most severe signal present, unifying
+    // the balance and reputation paths.
+    if !matches!(balance_level, RiskLevel::Low) {
+        signals.push(RiskSignal {
+            signal: "low_native_balance".to_string(),
+            description:
+                "Wallet holds little native gas token; may be fresh, drained, or a throwaway"
+                    .to_string(),
+            severity: balance_level.clone(),
+            value: serde_json::json!({ "native_balance": eth_balance_display }),
+        });
+    }
+    let overall_risk = overall_from_signals(&signals);
 
     let report = RiskReport {
         subject: args.address.clone(),
@@ -294,6 +305,7 @@ async fn wallet_risk(
             "eth_balance": eth_balance_raw,
             "eth_balance_display": eth_balance_display,
             "reputation_source": reputation.as_ref().map(|_| "goplus"),
+            "reputation_coverage": reputation.as_ref().map(|_| "best-effort"),
             "flagged": reputation.as_ref().map(|r| !r.is_clean()),
         }),
         analyzed_at: Utc::now(),
@@ -334,6 +346,7 @@ async fn wallet_risk_svm(
                 metadata: serde_json::json!({
                     "chain": "Solana",
                     "source": "goplus",
+                    "coverage": "best-effort",
                     "flagged": !sec.is_clean(),
                 }),
                 analyzed_at: Utc::now(),
