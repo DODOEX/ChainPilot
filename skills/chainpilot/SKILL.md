@@ -25,10 +25,13 @@ the DODO aggregator API for swap routing and `alloy` for RPC interaction.
 ## Non-EVM (SVM / BVM) support matrix
 
 ChainPilot's read-only commands also work on Solana (SVM) and Bitcoin
-mainnet (BVM). Write-side commands (swap, approval, token create / mint /
-renounce) remain EVM-only by design. Use `solana` / `svm` and `bitcoin` /
-`bvm` as chain aliases for analytics; pass SPL mints or BTC addresses
-directly for token/wallet/risk queries — address shape decides routing.
+mainnet (BVM). Swap *execution* (simulate / execute / status / history),
+approvals, and token create / mint / renounce remain EVM-only by design.
+The one read-only exception is `swap quote`, which works on Solana via the
+Jupiter aggregator (both `--from` and `--to` must be SPL mints). Use
+`solana` / `svm` and `bitcoin` / `bvm` as chain aliases for analytics; pass
+SPL mints or BTC addresses directly for token/wallet/risk queries — address
+shape decides routing.
 
 | Command | EVM | SVM (Solana) | BVM (Bitcoin) |
 |---|---|---|---|
@@ -48,7 +51,8 @@ directly for token/wallet/risk queries — address shape decides routing.
 | `risk token` | ✓ | ✓ GoPlus Solana | ✗ no metadata source |
 | `risk wallet` | ✓ ETH balance + GoPlus address reputation | ✓ GoPlus address reputation | ✗ no data source |
 | `risk approval` | ✓ | ✗ EVM-only concept | ✗ EVM-only concept |
-| `swap *` | ✓ | ✗ EVM-only | ✗ EVM-only |
+| `swap quote` | ✓ DODO | ✓ Jupiter (read-only, SPL mints) | ✗ no route provider |
+| `swap simulate / execute / status / history` | ✓ | ✗ EVM-only | ✗ EVM-only |
 
 For Solana wallet queries, **Debank is strongly recommended over Zerion** —
 Zerion's Solana indexing is asynchronous and may time out for cold wallets.
@@ -228,6 +232,15 @@ chainpilot [--chain-id <N>] swap quote --from <TOKEN> --to <TOKEN> --amount <AMO
 - `--slippage`: slippage tolerance in percent (default: 0.2)
 
 Returns a `quote_id` to pass to subsequent commands.
+
+**Solana (SVM) quotes**: if both `--from` and `--to` are SPL mints, the quote
+is routed to the Jupiter aggregator instead of DODO (read-only pricing — no
+DODO liquidity is used). The result uses the same `Quote` shape with
+`chain_id: 0`; EVM-only fields (`router_to`, `calldata`, gas) are empty and
+`dex_sources` lists the Jupiter route venues. This is quote-only: the returned
+`quote_id` is **not** persisted, so `swap simulate/execute` don't accept it —
+those stay EVM-only. Symbols aren't resolved on SVM; pass mint addresses.
+Mixing an SPL mint with an EVM token, or using a BTC address, is rejected.
 
 If the user passes a token address in `--from` or `--to` and the quote succeeds,
 the CLI automatically persists that token's metadata locally. Future symbol
