@@ -16,7 +16,9 @@ pub use dodo::DodoClient;
 pub use dune::DuneClient;
 pub use goldrush::{GoldrushAssetRecord, GoldrushChainBalance, GoldrushClient};
 #[allow(unused_imports)]
-pub use jupiter::{JupiterClient, JupiterToken, DEFAULT_JUPITER_API_URL};
+pub use jupiter::{
+    JupiterClient, JupiterQuote, JupiterRouteHop, JupiterToken, DEFAULT_JUPITER_API_URL,
+};
 // BitcoinBalance / BitcoinTx are exposed via MempoolClient methods directly;
 // re-export them so future callers outside wallet.rs can name the types
 // without paying the warning tax today.
