@@ -12,7 +12,8 @@ A command-line tool for on-chain DeFi operations on EVM-compatible networks. Bui
 - Manage ERC-20 approvals (approve / revoke)
 - Query token metadata and wallet balances on-chain
 - Create ERC-20 tokens via DODO ERC20V3Factory, mint on mintable tokens, and renounce ownership
-- Risk analysis for tokens, wallets, and approval allowances
+- Risk analysis for tokens, wallets, and approval allowances (wallet risk combines a native-balance heuristic with GoPlus malicious-address reputation)
+- Read-only support for non-EVM chains — Solana (SVM) and Bitcoin mainnet (BVM) — across `chain`, `protocol`, `token`, `wallet`, and `risk` queries, plus Solana swap quotes via Jupiter
 - Machine-readable JSON output (`--json`) for scripting and agent pipelines
 
 ## Installation
@@ -144,6 +145,35 @@ Custom token behavior:
 | Sepolia Testnet    | 11155111   |
 
 For unsupported chain IDs, pass `--rpc-url` manually.
+
+## Non-EVM Support (Solana / Bitcoin)
+
+ChainPilot's **read-only** commands also work on Solana (SVM) and Bitcoin
+mainnet (BVM). Routing is by address shape — pass an SPL mint or a BTC
+address directly, or use `solana` / `svm` and `bitcoin` / `bvm` as chain
+aliases for analytics. `--chain-id` does not apply to these lookups.
+
+Swap **execution** (simulate / execute / status / history), ERC-20
+approvals, and token create / mint / renounce stay **EVM-only** by design.
+The one read-only exception is `swap quote`, which prices Solana routes via
+the Jupiter aggregator when both `--from` and `--to` are SPL mints (no DODO
+liquidity is used, and the returned quote cannot be simulated or executed).
+
+| Command | EVM | Solana (SVM) | Bitcoin (BVM) |
+|---|---|---|---|
+| `chain` / `protocol` analytics | ✓ | ✓ DefiLlama | ✓ DefiLlama |
+| `wallet balance` / `overview` | ✓ | ✓ Debank → Zerion | ✓ mempool.space |
+| `wallet history` | ✓ | ✓ Zerion → Debank | ✓ mempool.space |
+| `wallet pnl` / `defi` | ✓ | ✓ Zerion / Debank | ✗ |
+| `token info` / `price` / `liquidity` | ✓ | ✓ Jupiter + CoinGecko + DexScreener | ✗ |
+| `token risk` / `risk token` | ✓ GoPlus | ✓ GoPlus Solana (authority-based) | ✗ |
+| `risk wallet` | ✓ balance + GoPlus reputation | ✓ GoPlus reputation | ✗ |
+| `swap quote` | ✓ DODO | ✓ Jupiter (read-only) | ✗ |
+| `swap simulate / execute / status`, approvals, token create/mint | ✓ | ✗ EVM-only | ✗ EVM-only |
+
+For Solana wallet queries, **Debank is recommended over Zerion** — Zerion's
+Solana indexing is asynchronous and may time out for cold wallets. Bitcoin
+entity labels are not integrated (mempool.space returns raw on-chain data only).
 
 ## Typical Swap Workflow
 
