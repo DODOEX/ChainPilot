@@ -138,6 +138,44 @@ struct GoPlusResponse {
     result: Option<std::collections::HashMap<String, GoPlusTokenSecurity>>,
 }
 
+/// Subset of GoPlus's Solana `token_security` payload. Solana SPL tokens
+/// expose authority-based risk (mint authority, freeze authority, etc.)
+/// rather than the EVM honeypot/blacklist fields, so the schema is
+/// disjoint from [`GoPlusTokenSecurity`].
+#[derive(Debug, Deserialize)]
+struct GoPlusSvmResponse {
+    code: u64,
+    result: Option<std::collections::HashMap<String, GoPlusSvmTokenSecurity>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct GoPlusSvmTokenSecurity {
+    mintable: Option<GoPlusAuthority>,
+    freezable: Option<GoPlusAuthority>,
+    closable: Option<GoPlusAuthority>,
+    transfer_fee: Option<GoPlusTransferFee>,
+    transfer_hook: Option<Vec<serde_json::Value>>,
+    non_transferable: Option<String>,
+    trusted_token: Option<u8>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct GoPlusAuthority {
+    authority: Option<Vec<serde_json::Value>>,
+}
+
+impl GoPlusAuthority {
+    fn is_active(&self) -> bool {
+        self.authority.as_ref().is_some_and(|a| !a.is_empty())
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct GoPlusTransferFee {
+    #[serde(default)]
+    transfer_fee: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 struct GoPlusTokenSecurity {
     #[serde(rename = "is_honeypot")]
@@ -156,6 +194,131 @@ struct GoPlusTokenSecurity {
     sell_tax: Option<String>,
     #[serde(rename = "trust_list")]
     trust_list: Option<String>,
+}
+
+/// Address-reputation flags from GoPlus's malicious-address library. The
+/// library is keyed on the raw address string and is largely chain-agnostic,
+/// so it covers non-EVM addresses (e.g. Solana base58) that GoPlus has seen
+/// flagged. Each field is `true` only when GoPlus returns `"1"`.
+#[derive(Clone, Debug, Default)]
+pub struct AddressSecurity {
+    pub sanctioned: bool,
+    pub phishing_activities: bool,
+    pub stealing_attack: bool,
+    pub blackmail_activities: bool,
+    pub cybercrime: bool,
+    pub money_laundering: bool,
+    pub financial_crime: bool,
+    pub darkweb_transactions: bool,
+    pub fake_kyc: bool,
+    pub malicious_mining_activities: bool,
+    pub honeypot_related_address: bool,
+    pub blacklist_doubt: bool,
+    pub mixer: bool,
+}
+
+impl AddressSecurity {
+    /// True when GoPlus returned no risk flags for the address — i.e. it has a
+    /// record but nothing adverse. Lets callers distinguish "clean" from the
+    /// `None` case (no record / request failed).
+    pub fn is_clean(&self) -> bool {
+        !(self.sanctioned
+            || self.phishing_activities
+            || self.stealing_attack
+            || self.blackmail_activities
+            || self.cybercrime
+            || self.money_laundering
+            || self.financial_crime
+            || self.darkweb_transactions
+            || self.fake_kyc
+            || self.malicious_mining_activities
+            || self.honeypot_related_address
+            || self.blacklist_doubt
+            || self.mixer)
+    }
+}
+
+/// GoPlus `address_security` returns a flat `result` object (unlike
+/// `token_security`, which keys results by contract address).
+#[derive(Debug, Deserialize)]
+struct GoPlusAddressSecurityResponse {
+    code: u64,
+    // Kept as a raw `Value` so we can defensively verify the shape before
+    // trusting it: deserializing a keyed map (e.g. a future schema change to
+    // `{ "<addr>": {...} }`) straight into the flat struct would silently
+    // yield all-`None` (an unflagged / "clean" result), a false negative.
+    result: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct GoPlusAddressSecurityRaw {
+    #[serde(default)]
+    sanctioned: Option<String>,
+    #[serde(default)]
+    phishing_activities: Option<String>,
+    #[serde(default)]
+    stealing_attack: Option<String>,
+    #[serde(default)]
+    blackmail_activities: Option<String>,
+    #[serde(default)]
+    cybercrime: Option<String>,
+    #[serde(default)]
+    money_laundering: Option<String>,
+    #[serde(default)]
+    financial_crime: Option<String>,
+    #[serde(default)]
+    darkweb_transactions: Option<String>,
+    #[serde(default)]
+    fake_kyc: Option<String>,
+    #[serde(default)]
+    malicious_mining_activities: Option<String>,
+    #[serde(default)]
+    honeypot_related_address: Option<String>,
+    #[serde(default)]
+    blacklist_doubt: Option<String>,
+    #[serde(default)]
+    mixer: Option<String>,
+}
+
+/// GoPlus encodes booleans as the strings `"1"` (true) / `"0"` (false).
+fn goplus_flag(value: &Option<String>) -> bool {
+    value.as_deref() == Some("1")
+}
+
+/// Parse a GoPlus `address_security` response body into [`AddressSecurity`].
+/// Pure (no I/O) so the shape guard is unit-testable. Returns `None` when the
+/// request wasn't a success (`code != 1`), there's no `result`, or the result
+/// isn't the expected flat reputation object — the last case guards against a
+/// schema drift silently reading as a false "clean".
+fn parse_address_security(body_text: &str) -> Option<AddressSecurity> {
+    let data: GoPlusAddressSecurityResponse = serde_json::from_str(body_text).ok()?;
+    if data.code != 1 {
+        return None;
+    }
+    let result = data.result?;
+    // The flat reputation object must actually carry a known flag key. A keyed
+    // map (`{ "<addr>": {...} }`) or renamed schema fails this check and is
+    // treated as "no record" (`None`) rather than an unflagged address.
+    let obj = result.as_object()?;
+    if !obj.contains_key("sanctioned") && !obj.contains_key("phishing_activities") {
+        return None;
+    }
+    let raw: GoPlusAddressSecurityRaw = serde_json::from_value(result).ok()?;
+    Some(AddressSecurity {
+        sanctioned: goplus_flag(&raw.sanctioned),
+        phishing_activities: goplus_flag(&raw.phishing_activities),
+        stealing_attack: goplus_flag(&raw.stealing_attack),
+        blackmail_activities: goplus_flag(&raw.blackmail_activities),
+        cybercrime: goplus_flag(&raw.cybercrime),
+        money_laundering: goplus_flag(&raw.money_laundering),
+        financial_crime: goplus_flag(&raw.financial_crime),
+        darkweb_transactions: goplus_flag(&raw.darkweb_transactions),
+        fake_kyc: goplus_flag(&raw.fake_kyc),
+        malicious_mining_activities: goplus_flag(&raw.malicious_mining_activities),
+        honeypot_related_address: goplus_flag(&raw.honeypot_related_address),
+        blacklist_doubt: goplus_flag(&raw.blacklist_doubt),
+        mixer: goplus_flag(&raw.mixer),
+    })
 }
 
 impl TokenMetadataClient {
@@ -440,6 +603,146 @@ impl TokenMetadataClient {
         risk
     }
 
+    /// Solana-specific token risk via GoPlus. Returns a [`TokenRisk`] with
+    /// `chain_id = 0` (sentinel for non-EVM). When GoPlus has no entry for
+    /// the mint, returned fields stay `None` (rendered as `N/A`) so the
+    /// caller never has to invent fake "low risk" defaults.
+    pub async fn fetch_risk_svm(
+        &self,
+        mint: &str,
+        symbol: &str,
+    ) -> crate::models::token::TokenRisk {
+        use crate::models::token::{TokenRisk, TokenRiskSources};
+
+        let mut risk = TokenRisk {
+            address: mint.to_string(),
+            symbol: symbol.to_string(),
+            chain_id: 0,
+            risk_level: None,
+            risk_score: None,
+            honeypot: None,
+            blacklist: None,
+            transfer_restricted: None,
+            mintable: None,
+            owner_privileged: None,
+            tax_buy: None,
+            tax_sell: None,
+            sources: TokenRiskSources::default(),
+        };
+
+        let Some(data) = self.fetch_goplus_risk_svm(mint).await else {
+            return risk;
+        };
+
+        let src = "goplus".to_string();
+
+        let mintable = data.mintable.as_ref().map(GoPlusAuthority::is_active);
+        if let Some(v) = mintable {
+            risk.mintable = Some(v);
+            risk.sources.mintable = Some(src.clone());
+        }
+
+        // On Solana the "owner privilege" surface combines freeze and close
+        // authorities — either lets the issuer disrupt a holder.
+        let freezable = data.freezable.as_ref().is_some_and(GoPlusAuthority::is_active);
+        let closable = data.closable.as_ref().is_some_and(GoPlusAuthority::is_active);
+        let owner_privileged = freezable || closable;
+        risk.owner_privileged = Some(owner_privileged);
+        risk.sources.owner_privileged = Some(src.clone());
+
+        // Transfer-restricted: explicit non_transferable flag, an attached
+        // transfer hook program, or a non-zero transfer fee.
+        let non_transferable = data.non_transferable.as_deref() == Some("1");
+        let has_hook = data
+            .transfer_hook
+            .as_ref()
+            .is_some_and(|h| !h.is_empty());
+        let transfer_fee_pct = parse_percent(
+            data.transfer_fee
+                .as_ref()
+                .and_then(|f| f.transfer_fee.as_deref()),
+        );
+        let has_fee = transfer_fee_pct.is_some_and(|p| p > 0.0);
+        risk.transfer_restricted = Some(non_transferable || has_hook || has_fee);
+        risk.sources.transfer_restricted = Some(src.clone());
+
+        // Solana transfer fees apply symmetrically (no separate buy/sell), so
+        // mirror them into both fields when present.
+        if let Some(pct) = transfer_fee_pct {
+            risk.tax_buy = Some(pct);
+            risk.tax_sell = Some(pct);
+            risk.sources.tax_buy = Some(src.clone());
+            risk.sources.tax_sell = Some(src.clone());
+        }
+
+        // GoPlus's `trusted_token` (1 = on a curated list) is the closest
+        // SVM signal to "low risk overall". Without it, severity stays None
+        // so the user sees `N/A` rather than a guessed level.
+        //
+        // A transfer restriction (fee / hook / non-transferable) is the gravest
+        // SVM signal and MUST outrank `trusted_token` — a curated Token-2022
+        // mint can still charge a fee, and reporting it `low` while
+        // `transfer_restricted = true` would contradict itself. So check the
+        // restriction first, then trusted-low, then the softer authority level.
+        let trusted = data.trusted_token == Some(1);
+        let level = if has_fee || has_hook || non_transferable {
+            Some("high".to_string())
+        } else if trusted && !mintable.unwrap_or(false) && !owner_privileged {
+            Some("low".to_string())
+        } else if mintable.unwrap_or(false) || owner_privileged {
+            Some("medium".to_string())
+        } else {
+            None
+        };
+        if let Some(l) = level {
+            risk.risk_level = Some(l);
+            risk.sources.risk_level = Some(src);
+        }
+
+        risk
+    }
+
+    /// Fetch GoPlus address-reputation flags for a wallet address. `chain_id`
+    /// scopes EVM lookups (and lets GoPlus resolve the `contract_address`
+    /// field); pass `None` for non-EVM addresses such as Solana, where the
+    /// malicious-address library is keyed on the raw address string. Returns
+    /// `None` when GoPlus has no record for the address or the request fails.
+    pub async fn fetch_address_security(
+        &self,
+        address: &str,
+        chain_id: Option<u64>,
+    ) -> Option<AddressSecurity> {
+        let url = format!("https://api.gopluslabs.io/api/v1/address_security/{address}");
+        let mut req = self.client.get(&url).timeout(Duration::from_secs(10));
+        if let Some(id) = chain_id {
+            req = req.query(&[("chain_id", id.to_string())]);
+        }
+        let resp = req.send().await.ok()?;
+        let body_text = resp.text().await.ok()?;
+        parse_address_security(&body_text)
+    }
+
+    async fn fetch_goplus_risk_svm(&self, mint: &str) -> Option<GoPlusSvmTokenSecurity> {
+        let url = "https://api.gopluslabs.io/api/v1/solana/token_security";
+        let resp = self
+            .client
+            .get(url)
+            .query(&[("contract_addresses", mint)])
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .ok()?;
+        let body_text = resp.text().await.ok()?;
+        let data: GoPlusSvmResponse = serde_json::from_str(&body_text).ok()?;
+        if data.code != 1 {
+            return None;
+        }
+        let result = data.result?;
+        // Solana mints are case-sensitive base58, but the result key is the
+        // mint itself — match exact first, fall through to any returned row.
+        result.get(mint).cloned().or_else(|| result.into_values().next())
+    }
+
     async fn fetch_goplus_risk(&self, chain_id: u64, address: &str) -> Option<GoPlusTokenSecurity> {
         let goplus_chain = goplus_chain_id(chain_id)?;
         let url = format!(
@@ -590,6 +893,146 @@ impl TokenMetadataClient {
             .collect()
     }
 
+    /// Solana-specific enrichment for a `TokenInfo` already populated with
+    /// `address` (SPL mint) and basic identity. Pulls CoinGecko data via
+    /// `coins/solana/contract/{mint}` and DexScreener pool data; the result
+    /// merges in price, market cap, top liquidity, etc. `is_native` logic and
+    /// `goplus` risk lookups don't apply on Solana and are skipped.
+    pub async fn enrich_svm(&self, mut info: TokenInfo) -> TokenInfo {
+        // CoinGecko and DexScreener both key on the bare mint with no data
+        // dependency between them, so fetch them concurrently.
+        let (coingecko, dexscreener) = tokio::join!(
+            self.fetch_coingecko("solana", &info.address),
+            self.fetch_dexscreener(&info.address),
+        );
+        let coingecko = coingecko.ok();
+        let dexscreener = dexscreener.ok();
+
+        let mut patch = TokenMetadataPatch::default();
+        apply_coingecko(&mut patch, coingecko);
+        apply_dexscreener(&mut patch, dexscreener, &info.address);
+        apply_patch(&mut info, patch);
+        info
+    }
+
+    /// Solana-specific price lookup. Tags the returned `TokenPrice` with
+    /// `chain_id = 0` (sentinel for non-EVM) so JSON consumers can detect
+    /// the lack of an EVM chain context.
+    pub async fn fetch_price_svm(&self, mint: &str, symbol: &str) -> crate::models::token::TokenPrice {
+        use crate::models::token::{TokenPrice, TokenPriceSources};
+
+        // Independent lookups on the bare mint — run concurrently.
+        let (coingecko, dexscreener) = tokio::join!(
+            self.fetch_coingecko("solana", mint),
+            self.fetch_dexscreener(mint),
+        );
+        let coingecko = coingecko.ok();
+        let dexscreener = dexscreener.ok();
+
+        let mut price = TokenPrice {
+            address: mint.to_string(),
+            symbol: symbol.to_string(),
+            chain_id: 0,
+            price: None,
+            price_change_1h: None,
+            price_change_24h: None,
+            price_change_7d: None,
+            high_24h: None,
+            low_24h: None,
+            sources: TokenPriceSources::default(),
+        };
+        apply_coingecko_price(&mut price, coingecko);
+        apply_dexscreener_price(&mut price, dexscreener, mint);
+        price
+    }
+
+    /// Solana-specific liquidity lookup. DexScreener's `/tokens/{address}`
+    /// endpoint already returns Solana pools when given an SPL mint, so this
+    /// just bypasses the EVM `is_native`/wrapped-address logic and labels
+    /// `chain_id = 0`.
+    pub async fn fetch_liquidity_svm(
+        &self,
+        mint: &str,
+        symbol: &str,
+    ) -> crate::models::token::TokenLiquidity {
+        use crate::models::token::{TokenLiquidity, TokenLiquiditySources, TokenLiquidityTopPair};
+
+        let pairs = match self.fetch_dexscreener(mint).await {
+            Ok(resp) => resp.pairs.unwrap_or_default(),
+            Err(_) => {
+                return TokenLiquidity {
+                    address: mint.to_string(),
+                    symbol: symbol.to_string(),
+                    chain_id: 0,
+                    top_liquidity: None,
+                    pair_count: 0,
+                    top_pair: None,
+                    sources: TokenLiquiditySources::default(),
+                };
+            }
+        };
+
+        let matching: Vec<&DexScreenerPair> = pairs
+            .iter()
+            .filter(|p| {
+                p.base_token
+                    .as_ref()
+                    .and_then(|t| t.address.as_deref())
+                    .is_some_and(|a| a.eq_ignore_ascii_case(mint))
+            })
+            .collect();
+
+        let top_liquidity = matching
+            .iter()
+            .filter_map(|p| p.liquidity.as_ref().and_then(|l| l.usd))
+            .fold(0.0f64, f64::max);
+        let top_liquidity = if top_liquidity > 0.0 {
+            Some(top_liquidity)
+        } else {
+            None
+        };
+
+        let top_pair = matching
+            .iter()
+            .max_by(|a, b| {
+                let la = a.liquidity.as_ref().and_then(|l| l.usd).unwrap_or(0.0);
+                let lb = b.liquidity.as_ref().and_then(|l| l.usd).unwrap_or(0.0);
+                la.partial_cmp(&lb).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .and_then(|p| {
+                let pair_address = p.pair_address.clone()?;
+                let dex = p.dex_id.clone().unwrap_or_else(|| "unknown".to_string());
+                let liquidity = p.liquidity.as_ref().and_then(|l| l.usd);
+                let volume_24h = p.volume.as_ref().and_then(|v| v.h24);
+                Some(TokenLiquidityTopPair {
+                    pair_address,
+                    dex,
+                    liquidity,
+                    volume_24h,
+                })
+            });
+
+        let src = if matching.is_empty() {
+            TokenLiquiditySources::default()
+        } else {
+            TokenLiquiditySources {
+                top_liquidity: Some("dexscreener".to_string()),
+                pair_count: Some("dexscreener".to_string()),
+                top_pair: Some("dexscreener".to_string()),
+            }
+        };
+
+        TokenLiquidity {
+            address: mint.to_string(),
+            symbol: symbol.to_string(),
+            chain_id: 0,
+            top_liquidity,
+            pair_count: matching.len(),
+            top_pair,
+            sources: src,
+        }
+    }
+
     async fn fetch_coingecko(
         &self,
         platform: &str,
@@ -666,27 +1109,28 @@ fn apply_coingecko(patch: &mut TokenMetadataPatch, token: Option<CoinGeckoToken>
         if let Some(url) = first_non_empty(links.homepage) {
             patch.website = Some((url, "coingecko".to_string()));
         }
-        let mut social = TokenSocialLinks::default();
-        social.x = non_empty(links.twitter_screen_name).map(|name| {
-            if name.starts_with("http") {
-                name
-            } else {
-                format!("https://x.com/{}", name.trim_start_matches('@'))
-            }
-        });
-        social.telegram = non_empty(links.telegram_channel_identifier).map(|name| {
-            if name.starts_with("http") {
-                name
-            } else {
-                format!("https://t.me/{}", name.trim_start_matches('@'))
-            }
-        });
-        social.discord = first_non_empty(links.chat_url);
-        social.github = links
-            .repos_url
-            .and_then(|repos| first_non_empty(repos.github));
-        social.docs = first_non_empty(links.blockchain_site)
-            .or_else(|| first_non_empty(links.official_forum_url));
+        let social = TokenSocialLinks {
+            x: non_empty(links.twitter_screen_name).map(|name| {
+                if name.starts_with("http") {
+                    name
+                } else {
+                    format!("https://x.com/{}", name.trim_start_matches('@'))
+                }
+            }),
+            telegram: non_empty(links.telegram_channel_identifier).map(|name| {
+                if name.starts_with("http") {
+                    name
+                } else {
+                    format!("https://t.me/{}", name.trim_start_matches('@'))
+                }
+            }),
+            discord: first_non_empty(links.chat_url),
+            github: links
+                .repos_url
+                .and_then(|repos| first_non_empty(repos.github)),
+            docs: first_non_empty(links.blockchain_site)
+                .or_else(|| first_non_empty(links.official_forum_url)),
+        };
         if has_social_links(&social) {
             patch.social_links = Some((social, "coingecko".to_string()));
         }
@@ -921,6 +1365,14 @@ fn apply_patch(info: &mut TokenInfo, patch: TokenMetadataPatch) {
     info.sources = sources;
 }
 
+/// Parse a GoPlus percentage string. GoPlus returns fractions ("0.05" =
+/// 5%) for EVM and percentages ("5" = 5%) for Solana transfer fees — this
+/// only handles the percentage-string form used by Solana's `transfer_fee`,
+/// returning the value in percent.
+fn parse_percent(raw: Option<&str>) -> Option<f64> {
+    raw.and_then(|s| s.trim().parse::<f64>().ok())
+}
+
 fn coingecko_platform_id(chain_id: u64) -> Option<&'static str> {
     match chain_id {
         1 => Some("ethereum"),
@@ -1076,6 +1528,39 @@ fn liquidity_usd(pair: &DexScreenerPair) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_address_security_reads_flat_flags() {
+        let body = r#"{"code":1,"message":"ok","result":{
+            "sanctioned":"1","phishing_activities":"0","stealing_attack":"1",
+            "cybercrime":"0","mixer":"0"}}"#;
+        let sec = parse_address_security(body).expect("flat result should parse");
+        assert!(sec.sanctioned);
+        assert!(sec.stealing_attack);
+        assert!(!sec.phishing_activities);
+        assert!(!sec.is_clean());
+    }
+
+    #[test]
+    fn parse_address_security_clean_when_all_zero() {
+        let body = r#"{"code":1,"result":{"sanctioned":"0","phishing_activities":"0"}}"#;
+        let sec = parse_address_security(body).expect("should parse");
+        assert!(sec.is_clean());
+    }
+
+    #[test]
+    fn parse_address_security_rejects_non_success_code() {
+        let body = r#"{"code":0,"message":"error","result":{"sanctioned":"1"}}"#;
+        assert!(parse_address_security(body).is_none());
+    }
+
+    #[test]
+    fn parse_address_security_rejects_keyed_map_shape() {
+        // Schema-drift guard: a result keyed by address must NOT read as a
+        // clean/unflagged address (which would be a false negative).
+        let body = r#"{"code":1,"result":{"0xabc":{"sanctioned":"1"}}}"#;
+        assert!(parse_address_security(body).is_none());
+    }
 
     #[test]
     fn coingecko_platform_id_maps_supported_chains() {

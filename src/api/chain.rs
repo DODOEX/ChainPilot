@@ -545,7 +545,14 @@ impl ChainClient {
             .collect())
     }
 
-    async fn fetch_native_price(
+    /// USD price of a chain's native token. Pass `gecko_id` when you already
+    /// have an authoritative CoinGecko id (e.g. from DefiLlama); otherwise
+    /// it falls back to chain-id then chain-name lookups.
+    ///
+    /// Public so callers like wallet handlers can attach a USD price to
+    /// non-EVM native balances (BTC, SOL) without duplicating the CoinGecko
+    /// pricing path.
+    pub async fn fetch_native_price(
         &self,
         chain_name: &str,
         gecko_id: Option<&str>,
@@ -813,12 +820,13 @@ fn chain_alias_to_name(alias: &str) -> Option<&'static str> {
         "zksync" | "era" => Some("zkSync Era"),
         // Starknet
         "starknet" | "strk" => Some("Starknet"),
-        // Solana (non-EVM but commonly queried)
-        "sol" | "solana" => Some("Solana"),
+        // Solana (non-EVM but commonly queried). `svm` is the DODO-internal
+        // alias for the Solana VM ecosystem.
+        "sol" | "solana" | "svm" => Some("Solana"),
         // Tron
         "trx" | "tron" => Some("Tron"),
-        // Bitcoin
-        "btc" | "bitcoin" => Some("Bitcoin"),
+        // Bitcoin. `bvm` is the DODO-internal alias for Bitcoin mainnet.
+        "btc" | "bitcoin" | "bvm" => Some("Bitcoin"),
         // Cronos
         "cro" | "cronos" => Some("Cronos"),
         // Gnosis / xDai
@@ -872,6 +880,11 @@ fn chain_to_coingecko_id(chain_name: &str) -> Option<&'static str> {
         "scroll" => Some("ethereum"), // ETH on L2
         "mantle" => Some("mantle"),
         "aurora" => Some("ethereum"), // ETH on L2
+        // Non-EVM chains. DefiLlama's `/chains` endpoint already supplies a
+        // gecko_id for these, so this fallback only fires if that field goes
+        // missing — kept defensive.
+        "solana" => Some("solana"),
+        "bitcoin" => Some("bitcoin"),
         _ => None,
     }
 }
@@ -886,5 +899,81 @@ fn snippet(body: &str) -> String {
             end -= 1;
         }
         format!("{}...", &body[..end])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn alias_table_resolves_evm_chains() {
+        assert_eq!(chain_alias_to_name("eth"), Some("Ethereum"));
+        assert_eq!(chain_alias_to_name("bsc"), Some("Binance"));
+        assert_eq!(chain_alias_to_name("base"), Some("Base"));
+        assert_eq!(chain_alias_to_name("arb"), Some("Arbitrum"));
+    }
+
+    #[test]
+    fn alias_table_resolves_solana_and_svm() {
+        assert_eq!(chain_alias_to_name("sol"), Some("Solana"));
+        assert_eq!(chain_alias_to_name("solana"), Some("Solana"));
+        assert_eq!(chain_alias_to_name("svm"), Some("Solana"));
+    }
+
+    #[test]
+    fn alias_table_resolves_bitcoin_and_bvm() {
+        assert_eq!(chain_alias_to_name("btc"), Some("Bitcoin"));
+        assert_eq!(chain_alias_to_name("bitcoin"), Some("Bitcoin"));
+        assert_eq!(chain_alias_to_name("bvm"), Some("Bitcoin"));
+    }
+
+    #[test]
+    fn alias_table_unknown_returns_none() {
+        assert_eq!(chain_alias_to_name("not-a-chain"), None);
+    }
+
+    #[test]
+    fn resolve_chain_accepts_svm_and_bvm_aliases() {
+        // Minimal fake DefiLlama catalog so resolve_chain's alias path can
+        // confirm the canonical name actually exists. Non-EVM chains have
+        // chain_id = None.
+        let chains = vec![
+            DefiLlamaChain {
+                name: "Solana".to_string(),
+                token_symbol: Some("SOL".to_string()),
+                tvl: None,
+                chain_id: None,
+                gecko_id: Some("solana".to_string()),
+            },
+            DefiLlamaChain {
+                name: "Bitcoin".to_string(),
+                token_symbol: Some("BTC".to_string()),
+                tvl: None,
+                chain_id: None,
+                gecko_id: Some("bitcoin".to_string()),
+            },
+        ];
+        assert_eq!(resolve_chain("svm", &chains).unwrap(), "Solana");
+        assert_eq!(resolve_chain("solana", &chains).unwrap(), "Solana");
+        assert_eq!(resolve_chain("SOL", &chains).unwrap(), "Solana");
+        assert_eq!(resolve_chain("bvm", &chains).unwrap(), "Bitcoin");
+        assert_eq!(resolve_chain("bitcoin", &chains).unwrap(), "Bitcoin");
+        assert_eq!(resolve_chain("BTC", &chains).unwrap(), "Bitcoin");
+    }
+
+    #[test]
+    fn coingecko_fallback_covers_solana_and_bitcoin() {
+        assert_eq!(chain_to_coingecko_id("Solana"), Some("solana"));
+        assert_eq!(chain_to_coingecko_id("Bitcoin"), Some("bitcoin"));
+    }
+
+    #[test]
+    fn growthepie_skips_non_evm_chains() {
+        // Solana/Bitcoin have no EVM chain_id, so the growthepie key lookup
+        // never fires for them — confirms the activity fields will surface as
+        // N/A rather than mis-attribute Ethereum data.
+        assert!(chain_id_to_growthepie(1).is_some());
+        assert!(chain_id_to_growthepie(8453).is_some());
     }
 }

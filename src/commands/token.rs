@@ -4,11 +4,12 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use crate::api::ApiClients;
-use crate::chain::OnChainClient;
+use crate::chain::{AddressRef, OnChainClient};
 use crate::cli::token::{
     TokenAction, TokenCmd, TokenCreateAction, TokenCreateCustomArgs, TokenCreateMintableArgs,
     TokenCreateStdArgs, TokenFeeArgs, TokenIdentArg, TokenMintArgs, TokenOwnershipArgs,
 };
+use crate::models::token::{TokenInfo, TokenInfoSources, TokenSocialLinks};
 use crate::commands::resolve_token;
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
@@ -47,6 +48,160 @@ pub async fn handle(
     }
 }
 
+/// Standard error for token commands invoked with a Bitcoin address.
+/// Bitcoin mainnet has no standardized fungible-token metadata source
+/// (Ordinals/BRC-20/Runes catalogs vary widely), so we short-circuit
+/// instead of pretending to resolve.
+fn unsupported_token_on_bvm(command: &str) -> ChainError {
+    ChainError::Config(format!(
+        "{command} is not supported on Bitcoin mainnet — no standardized token metadata source"
+    ))
+}
+
+/// Build a `TokenInfo` for an SPL mint. Identity comes from Jupiter when the
+/// mint is in their index, otherwise from CoinGecko's
+/// `coins/solana/contract/{mint}`; either path also feeds price, market cap,
+/// and liquidity via [`TokenMetadataClient::enrich_svm`].
+async fn info_svm(
+    mint: &str,
+    api: &ApiClients,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    let ctx = OutputContext::new(0, false);
+
+    // Jupiter is the authoritative SPL identity source; it carries decimals,
+    // name, and symbol. If unavailable (network failure or unindexed mint),
+    // synthesize a minimal info object and let enrich_svm patch the rest.
+    let identity = match api.jupiter.token(mint).await {
+        Ok(Some(t)) => TokenInfo {
+            address: t.address,
+            symbol: t.symbol,
+            name: t.name,
+            decimals: t.decimals,
+            chain_id: 0,
+            chain: Some("Solana".to_string()),
+            website: None,
+            social_links: TokenSocialLinks::default(),
+            price: None,
+            market_cap: None,
+            fdv: None,
+            top_liquidity: None,
+            volume_24h: None,
+            price_change_24h: None,
+            risk_level: None,
+            sources: TokenInfoSources {
+                identity: Some("jupiter".to_string()),
+                chain: Some("jupiter".to_string()),
+                ..TokenInfoSources::default()
+            },
+        },
+        Ok(None) | Err(_) => TokenInfo {
+            address: mint.to_string(),
+            symbol: String::new(),
+            name: String::new(),
+            decimals: 0,
+            chain_id: 0,
+            chain: Some("Solana".to_string()),
+            website: None,
+            social_links: TokenSocialLinks::default(),
+            price: None,
+            market_cap: None,
+            fdv: None,
+            top_liquidity: None,
+            volume_24h: None,
+            price_change_24h: None,
+            risk_level: None,
+            sources: TokenInfoSources {
+                chain: Some("user-supplied".to_string()),
+                ..TokenInfoSources::default()
+            },
+        },
+    };
+
+    let enriched = api.token_metadata.enrich_svm(identity).await;
+    Ok(crate::output::print_output::<TokenInfo>(
+        Ok(enriched),
+        "token.info",
+        output_mode,
+        ctx,
+    ))
+}
+
+async fn price_svm(
+    mint: &str,
+    api: &ApiClients,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    // The symbol echo is best-effort: Jupiter gives it cheaply when the mint
+    // is indexed, otherwise we leave it blank and let CoinGecko/DexScreener
+    // surface name/symbol via the standard price output.
+    let symbol = api
+        .jupiter
+        .token(mint)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| t.symbol)
+        .unwrap_or_default();
+    let price = api.token_metadata.fetch_price_svm(mint, &symbol).await;
+    Ok(crate::output::print_output::<
+        crate::models::token::TokenPrice,
+    >(
+        Ok(price),
+        "token.price",
+        output_mode,
+        OutputContext::new(0, false),
+    ))
+}
+
+async fn risk_svm(
+    mint: &str,
+    api: &ApiClients,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    let symbol = api
+        .jupiter
+        .token(mint)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| t.symbol)
+        .unwrap_or_default();
+    let risk = api.token_metadata.fetch_risk_svm(mint, &symbol).await;
+    Ok(crate::output::print_output::<
+        crate::models::token::TokenRisk,
+    >(
+        Ok(risk),
+        "token.risk",
+        output_mode,
+        OutputContext::new(0, false),
+    ))
+}
+
+async fn liquidity_svm(
+    mint: &str,
+    api: &ApiClients,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    let symbol = api
+        .jupiter
+        .token(mint)
+        .await
+        .ok()
+        .flatten()
+        .map(|t| t.symbol)
+        .unwrap_or_default();
+    let liq = api.token_metadata.fetch_liquidity_svm(mint, &symbol).await;
+    Ok(crate::output::print_output::<
+        crate::models::token::TokenLiquidity,
+    >(
+        Ok(liq),
+        "token.liquidity",
+        output_mode,
+        OutputContext::new(0, false),
+    ))
+}
+
 async fn info(
     args: TokenIdentArg,
     api: &ApiClients,
@@ -54,6 +209,25 @@ async fn info(
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    // Branch on address shape so SPL mints and Bitcoin addresses don't have
+    // to round-trip through the EVM resolver. Symbol-only queries (no
+    // address shape) fall through to the existing EVM path; users wanting
+    // an SVM token by symbol should pass the SPL mint directly.
+    match AddressRef::parse(&args.token) {
+        Ok(AddressRef::Svm(mint)) => return info_svm(&mint, api, output_mode).await,
+        Ok(AddressRef::Bvm(_)) => {
+            return Ok(
+                crate::output::print_output::<crate::models::token::TokenInfo>(
+                    Err(unsupported_token_on_bvm("token info")),
+                    "token.info",
+                    output_mode,
+                    OutputContext::new(config.chain_id, false),
+                ),
+            );
+        }
+        _ => {}
+    }
+
     let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
@@ -168,6 +342,21 @@ async fn price(
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    match AddressRef::parse(&args.token) {
+        Ok(AddressRef::Svm(mint)) => return price_svm(&mint, api, output_mode).await,
+        Ok(AddressRef::Bvm(_)) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::TokenPrice,
+            >(
+                Err(unsupported_token_on_bvm("token price")),
+                "token.price",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+        _ => {}
+    }
+
     let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
@@ -229,6 +418,21 @@ async fn liquidity(
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    match AddressRef::parse(&args.token) {
+        Ok(AddressRef::Svm(mint)) => return liquidity_svm(&mint, api, output_mode).await,
+        Ok(AddressRef::Bvm(_)) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::TokenLiquidity,
+            >(
+                Err(unsupported_token_on_bvm("token liquidity")),
+                "token.liquidity",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+        _ => {}
+    }
+
     let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
@@ -290,6 +494,21 @@ async fn risk(
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    match AddressRef::parse(&args.token) {
+        Ok(AddressRef::Svm(mint)) => return risk_svm(&mint, api, output_mode).await,
+        Ok(AddressRef::Bvm(_)) => {
+            return Ok(
+                crate::output::print_output::<crate::models::token::TokenRisk>(
+                    Err(unsupported_token_on_bvm("token risk")),
+                    "token.risk",
+                    output_mode,
+                    OutputContext::new(config.chain_id, false),
+                ),
+            );
+        }
+        _ => {}
+    }
+
     let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
@@ -351,6 +570,36 @@ async fn contract(
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    // `token contract` reads EVM-specific surface (proxy detection, owner,
+    // implementation address). SPL mints and Bitcoin addresses have no
+    // matching concept, so short-circuit with a clear message rather than
+    // bubbling alloy/RPC errors.
+    match AddressRef::parse(&args.token) {
+        Ok(AddressRef::Svm(_)) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::TokenContract,
+            >(
+                Err(ChainError::Config(
+                    "token contract is not supported on Solana — SPL mints have no EVM-equivalent contract surface".to_string(),
+                )),
+                "token.contract",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+        Ok(AddressRef::Bvm(_)) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::TokenContract,
+            >(
+                Err(unsupported_token_on_bvm("token contract")),
+                "token.contract",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+        _ => {}
+    }
+
     let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;
@@ -407,6 +656,37 @@ async fn add(
     store: &QuoteStore,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    // The custom-token store is keyed by EVM (chain_id, address). SPL mints
+    // and Bitcoin addresses can't be persisted under that schema today, so
+    // reject early with a specific message rather than the generic
+    // "Invalid address" alloy returns.
+    match AddressRef::parse(&args.address) {
+        Ok(AddressRef::Svm(_)) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::CustomTokenRecord,
+            >(
+                Err(ChainError::Config(
+                    "token add is not supported on Solana — the custom token store is EVM-only"
+                        .to_string(),
+                )),
+                "token.add",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+        Ok(AddressRef::Bvm(_)) => {
+            return Ok(crate::output::print_output::<
+                crate::models::token::CustomTokenRecord,
+            >(
+                Err(unsupported_token_on_bvm("token add")),
+                "token.add",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+        _ => {}
+    }
+
     let chain_id = config.chain_id;
     let chain_client = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_client;

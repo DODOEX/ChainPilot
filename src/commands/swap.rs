@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use alloy_signer_local::PrivateKeySigner;
 
 use crate::api::ApiClients;
-use crate::chain::OnChainClient;
+use crate::chain::{AddressRef, OnChainClient};
 use crate::cli::swap::{
     ApproveArgs, ExecuteArgs, HistoryArgs, QuoteArgs, RevokeArgs, SimulateArgs, StatusArgs,
     SwapAction, SwapCmd,
@@ -14,7 +14,7 @@ use crate::cli::swap::{
 use crate::commands::{parse_display_amount, resolve_token, to_raw_amount};
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
-use crate::models::quote::{Quote, QuoteRequest, TokenRef};
+use crate::models::quote::{Quote, QuoteRequest, RouteHop, TokenRef};
 use crate::models::swap::{ExecutionResult, ExecutionStatus, SimulationResult};
 use crate::output::{OutputContext, OutputMode};
 use crate::store::QuoteStore;
@@ -228,6 +228,78 @@ impl ApprovalDeps for LiveApprovalDeps<'_> {
     }
 }
 
+/// How a `swap quote` request should be routed based on the address shapes of
+/// `--from` / `--to`. DODO's route API is EVM-only; Solana pairs go to Jupiter
+/// (read-only quote); Bitcoin and mixed EVM/SVM pairs are rejected.
+enum QuoteRoute {
+    Evm,
+    Svm,
+    Reject(ChainError),
+}
+
+fn classify_quote_route(from: &str, to: &str) -> QuoteRoute {
+    let from_kind = AddressRef::parse(from).ok();
+    let to_kind = AddressRef::parse(to).ok();
+    let is_bvm = |k: &Option<AddressRef>| matches!(k, Some(AddressRef::Bvm(_)));
+    let is_svm = |k: &Option<AddressRef>| matches!(k, Some(AddressRef::Svm(_)));
+
+    if is_bvm(&from_kind) || is_bvm(&to_kind) {
+        return QuoteRoute::Reject(ChainError::Config(
+            "swap is not supported on Bitcoin mainnet — no route provider is wired".to_string(),
+        ));
+    }
+    match (is_svm(&from_kind), is_svm(&to_kind)) {
+        (true, true) => QuoteRoute::Svm,
+        (false, false) => QuoteRoute::Evm,
+        // One side SPL, the other EVM/symbol: a cross-chain swap we can't do.
+        _ => QuoteRoute::Reject(ChainError::Config(
+            "swap quote can't mix Solana and EVM tokens — for a Solana quote both --from and --to must be SPL mints".to_string(),
+        )),
+    }
+}
+
+/// Classify a transaction hash by shape. EVM hashes and Bitcoin txids both
+/// encode 32 bytes as hex, so a 64-char hex string with no `0x` prefix is
+/// genuinely ambiguous between the two. We only *reject* the shapes that can
+/// never be an EVM hash (base58 Solana signatures); for the ambiguous 64-hex
+/// case we nudge the user toward the `0x` prefix rather than asserting a chain,
+/// since the common cause is an EVM hash pasted without its prefix.
+fn swap_non_evm_tx_hash_error(raw: &str) -> Option<ChainError> {
+    let trimmed = raw.trim();
+    let stripped = trimmed.strip_prefix("0x");
+
+    if let Some(hex) = stripped {
+        if hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
+    }
+
+    // 64 hex chars without `0x`: ambiguous (EVM hash missing its prefix, or a
+    // BTC txid). Don't assert Bitcoin — point at the missing prefix, which is
+    // the actionable fix for the far more common EVM case.
+    if trimmed.len() == 64 && trimmed.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Some(ChainError::Config(
+            "swap status expects an EVM transaction hash — prefix it with 0x (Bitcoin txids are not tracked; DODO swap history only covers EVM transactions)".to_string(),
+        ));
+    }
+
+    // base58-shaped strings ≥ 32 chars are Solana signatures (~88 typical).
+    let looks_base58 = !trimmed.is_empty()
+        && trimmed.bytes().all(|b| {
+            b.is_ascii_alphanumeric() && b != b'0' && b != b'O' && b != b'I' && b != b'l'
+        });
+    if looks_base58 && trimmed.len() >= 32 {
+        return Some(ChainError::Config(
+            "swap status is not supported for Solana — DODO swap history only tracks EVM transactions".to_string(),
+        ));
+    }
+
+    Some(ChainError::Config(format!(
+        "swap status expects an EVM transaction hash (0x + 64 hex chars; got {} chars)",
+        trimmed.len()
+    )))
+}
+
 pub async fn handle(
     cmd: SwapCmd,
     config: &AppConfig,
@@ -253,6 +325,24 @@ async fn quote(
     api: &ApiClients,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
+    // DODO's `getdodoroute` endpoint is EVM-only. Solana (SPL-mint) pairs are
+    // routed to Jupiter for a read-only quote; Bitcoin and mixed EVM/SVM pairs
+    // are rejected up-front so the user sees a routing-level error, not a vague
+    // "Token not found" from the resolver. `simulate`/`execute`/`status` stay
+    // EVM-only regardless — SVM quotes are quote-only and not persisted.
+    match classify_quote_route(&args.from, &args.to) {
+        QuoteRoute::Evm => {}
+        QuoteRoute::Svm => return quote_svm(&args, api, output_mode).await,
+        QuoteRoute::Reject(err) => {
+            return Ok(crate::output::print_output::<crate::models::quote::Quote>(
+                Err(err),
+                "swap.quote",
+                output_mode,
+                OutputContext::new(config.chain_id, false),
+            ));
+        }
+    }
+
     let chain_id = config.chain_id;
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     let onchain = &chain_onchain;
@@ -262,7 +352,7 @@ async fn quote(
     let user_addr = match config.wallet_address.as_deref() {
         Some(addr) => match addr.parse::<Address>() {
             Ok(parsed) => parsed.to_string(),
-            Err(_) => return Err(ChainError::InvalidAddress(addr.to_string()).into()),
+            Err(_) => return Err(ChainError::InvalidAddress(addr.to_string())),
         },
         None => Address::ZERO.to_string(),
     };
@@ -289,6 +379,126 @@ async fn quote(
         output_mode,
         OutputContext::new(chain_id, false),
     ))
+}
+
+/// Read-only Solana swap quote via Jupiter. `swap quote` only — `simulate`,
+/// `execute`, and `status` remain EVM-only, so the quote is NOT persisted to
+/// the store (there is no follow-up command to consume it). Both `--from` and
+/// `--to` must be SPL mints; symbol resolution isn't wired for SVM. The result
+/// is mapped into the shared [`Quote`] model with `chain_id = 0` (non-EVM
+/// sentinel) and EVM-only fields (calldata/router/gas) left empty, mirroring
+/// how the SVM token/risk commands reuse the EVM models.
+async fn quote_svm(
+    args: &QuoteArgs,
+    api: &ApiClients,
+    output_mode: OutputMode,
+) -> Result<ExitCode> {
+    let ctx = OutputContext::new(0, false);
+    Ok(crate::output::print_output::<crate::models::quote::Quote>(
+        build_svm_quote(args, api).await,
+        "swap.quote",
+        output_mode,
+        ctx,
+    ))
+}
+
+/// Convert a raw base-unit amount string to a display float. Display-only
+/// (mirrors DODO's `f64` amounts); not used for settlement math.
+fn raw_to_display(raw: &str, decimals: u8) -> f64 {
+    raw.parse::<f64>().unwrap_or(0.0) / 10f64.powi(decimals as i32)
+}
+
+async fn build_svm_quote(args: &QuoteArgs, api: &ApiClients) -> Result<Quote> {
+    // Resolve both mints via Jupiter for decimals + symbol. The two lookups are
+    // independent, so run them concurrently. A miss means the mint isn't in
+    // Jupiter's index, so it isn't routable here.
+    let (from_res, to_res) = tokio::join!(api.jupiter.token(&args.from), api.jupiter.token(&args.to));
+    let from_meta = from_res?.ok_or_else(|| {
+        ChainError::Config(format!("Solana mint not found on Jupiter: {}", args.from))
+    })?;
+    let to_meta = to_res?.ok_or_else(|| {
+        ChainError::Config(format!("Solana mint not found on Jupiter: {}", args.to))
+    })?;
+
+    let amount_display = parse_display_amount(&args.amount)?;
+    let amount_raw = to_raw_amount(&args.amount, from_meta.decimals)?;
+    // `args.slippage` is a percent (e.g. 1.0 = 1%); Jupiter wants basis points.
+    let slippage_bps = (args.slippage * 100.0).round().clamp(0.0, u32::MAX as f64) as u32;
+
+    let jq = api
+        .jupiter
+        .quote(&from_meta.address, &to_meta.address, &amount_raw, slippage_bps)
+        .await?;
+
+    let to_amount_display = raw_to_display(&jq.out_amount, to_meta.decimals);
+    let to_amount_min_display = raw_to_display(&jq.other_amount_threshold, to_meta.decimals);
+    let exchange_rate = if amount_display > 0.0 {
+        to_amount_display / amount_display
+    } else {
+        0.0
+    };
+
+    let route_summary: Vec<RouteHop> = jq
+        .route
+        .iter()
+        .map(|h| RouteHop {
+            pool_address: h.amm_key.clone(),
+            dex_name: h.label.clone(),
+            from_token: h.input_mint.clone(),
+            to_token: h.output_mint.clone(),
+            percent: h.percent,
+        })
+        .collect();
+    let mut dex_sources: Vec<String> = Vec::new();
+    for hop in &jq.route {
+        if !hop.label.is_empty() && !dex_sources.contains(&hop.label) {
+            dex_sources.push(hop.label.clone());
+        }
+    }
+
+    let now = Utc::now();
+    let expires_at =
+        now + std::time::Duration::from_secs(crate::config::DEFAULT_QUOTE_TTL_SECS);
+
+    Ok(Quote {
+        quote_id: uuid::Uuid::new_v4(),
+        created_at: now,
+        expires_at,
+        from_token: TokenRef {
+            symbol: from_meta.symbol,
+            address: from_meta.address,
+            decimals: from_meta.decimals,
+            chain_id: 0,
+        },
+        to_token: TokenRef {
+            symbol: to_meta.symbol,
+            address: to_meta.address,
+            decimals: to_meta.decimals,
+            chain_id: 0,
+        },
+        from_amount: args.amount.clone(),
+        from_amount_display: amount_display,
+        to_amount: to_amount_display.to_string(),
+        to_amount_display,
+        to_amount_min: to_amount_min_display.to_string(),
+        // Jupiter reports a decimal fraction; the model/renderer treats
+        // `price_impact_pct` as a percentage (shown as `{}%`).
+        price_impact_pct: jq.price_impact_pct * 100.0,
+        exchange_rate,
+        route_summary,
+        dex_sources,
+        route_id: None,
+        // EVM-only settlement fields: unused for a read-only Solana quote.
+        router_to: String::new(),
+        calldata: String::new(),
+        value: "0".to_string(),
+        gas_limit: None,
+        estimated_gas: None,
+        estimated_gas_usd: None,
+        raw_dodo_response: jq.raw,
+        chain_id: 0,
+        slippage: args.slippage,
+    })
 }
 
 async fn record_custom_tokens_from_quote_inputs(
@@ -369,8 +579,7 @@ async fn fetch_quote_with_fallback<D: QuoteDeps>(
                         have: have_raw,
                         need: amount_raw,
                         token: from_token.symbol.clone(),
-                    }
-                    .into());
+                    });
                 }
             } else {
                 let token_addr = from_token
@@ -384,8 +593,7 @@ async fn fetch_quote_with_fallback<D: QuoteDeps>(
                         have: have_raw,
                         need: amount_raw,
                         token: from_token.symbol.clone(),
-                    }
-                    .into());
+                    });
                 }
 
                 if let Some(chain_cfg) = config.chain_config_for(req.chain_id) {
@@ -403,8 +611,7 @@ async fn fetch_quote_with_fallback<D: QuoteDeps>(
                         return Err(ChainError::NotApproved {
                             token: from_token.address.clone(),
                             spender: chain_cfg.contracts.dodo_approve.to_string(),
-                        }
-                        .into());
+                        });
                     }
                 }
             }
@@ -911,6 +1118,21 @@ async fn execute_quote_with_deps<D: ExecuteDeps>(
 
 async fn status(args: StatusArgs, config: &AppConfig, output_mode: OutputMode) -> Result<ExitCode> {
     let chain_id = config.chain_id;
+
+    // Reject obviously non-EVM transaction hashes before we hit alloy. A
+    // 64-char hex with no `0x` prefix happens to be a valid Bitcoin txid and
+    // *would* parse as an EVM hash — but the EVM RPC will then report
+    // "Transaction not found", misleading the user. SPL signatures are
+    // base58 and never look like EVM hashes; flag both shapes here.
+    if let Some(err) = swap_non_evm_tx_hash_error(&args.tx_hash) {
+        return Ok(crate::output::print_output::<crate::chain::TxStatus>(
+            Err(err),
+            "swap.status",
+            output_mode,
+            OutputContext::new(chain_id, false),
+        ));
+    }
+
     let chain_onchain = OnChainClient::for_chain(config, chain_id).await?;
     match crate::chain::get_tx_receipt(&chain_onchain, &args.tx_hash).await {
         Ok(Some(status)) => Ok(crate::output::print_output::<crate::chain::TxStatus>(

@@ -22,6 +22,50 @@ description: >
 ChainPilot is a Rust CLI for on-chain DeFi operations on EVM networks. It uses
 the DODO aggregator API for swap routing and `alloy` for RPC interaction.
 
+## Non-EVM (SVM / BVM) support matrix
+
+ChainPilot's read-only commands also work on Solana (SVM) and Bitcoin
+mainnet (BVM). Swap *execution* (simulate / execute / status / history),
+approvals, and token create / mint / renounce remain EVM-only by design.
+The one read-only exception is `swap quote`, which works on Solana via the
+Jupiter aggregator (both `--from` and `--to` must be SPL mints). Use
+`solana` / `svm` and `bitcoin` / `bvm` as chain aliases for analytics; pass
+SPL mints or BTC addresses directly for token/wallet/risk queries — address
+shape decides routing.
+
+| Command | EVM | SVM (Solana) | BVM (Bitcoin) |
+|---|---|---|---|
+| `chain info/flows/stablecoins/protocols` | ✓ | ✓ DefiLlama | ✓ DefiLlama |
+| `protocol info/tvl/revenue/chains` | ✓ | ✓ DefiLlama | ✓ DefiLlama |
+| `wallet balance` | ✓ | ✓ Debank → Zerion | ✓ mempool.space |
+| `wallet overview` | ✓ | ✓ Debank → Zerion | ✓ derived from balance |
+| `wallet pnl` | ✓ | ✓ Zerion | ✗ no data source |
+| `wallet history` | ✓ | ✓ Zerion → Debank | ✓ mempool.space |
+| `wallet labels` | ✓ | ✓ Zerion (Dune is EVM-only) | ✗ not integrated¹ |
+| `wallet defi` | ✓ | ✓ Debank → Zerion | ✗ no data source |
+| `token info` | ✓ | ✓ Jupiter + CoinGecko + DexScreener | ✗ no metadata source |
+| `token price` | ✓ | ✓ CoinGecko + DexScreener | ✗ no metadata source |
+| `token liquidity` | ✓ | ✓ DexScreener | ✗ no metadata source |
+| `token risk` | ✓ GoPlus | ✓ GoPlus Solana (authority-based) | ✗ no metadata source |
+| `token contract / add / create / mint / fee / renounce` | ✓ | ✗ EVM-only | ✗ EVM-only |
+| `risk token` | ✓ | ✓ GoPlus Solana | ✗ no metadata source |
+| `risk wallet` | ✓ ETH balance + GoPlus address reputation | ✓ GoPlus address reputation | ✗ no data source |
+| `risk approval` | ✓ | ✗ EVM-only concept | ✗ EVM-only concept |
+| `swap quote` | ✓ DODO | ✓ Jupiter (read-only, SPL mints) | ✗ no route provider |
+| `swap simulate / execute / status / history` | ✓ | ✗ EVM-only | ✗ EVM-only |
+
+For Solana wallet queries, **Debank is strongly recommended over Zerion** —
+Zerion's Solana indexing is asynchronous and may time out for cold wallets.
+On the `--chain-id` global flag: SVM/BVM ignore it (chain context comes
+from the address itself); EVM commands continue to require it for the
+target chain selection.
+
+¹ Bitcoin entity labels are not integrated. The integrated provider
+(mempool.space) returns raw on-chain data only — no attribution. Sources that
+do cover BTC labels (Breadcrumbs, MetaSleuth, Arkham, Chainalysis) all require
+a new client and a paid/keyed API, and BTC isn't a DODO trading target, so
+this is deferred rather than impossible.
+
 ## Installation
 
 Before using ChainPilot, check if it is installed:
@@ -189,6 +233,15 @@ chainpilot [--chain-id <N>] swap quote --from <TOKEN> --to <TOKEN> --amount <AMO
 
 Returns a `quote_id` to pass to subsequent commands.
 
+**Solana (SVM) quotes**: if both `--from` and `--to` are SPL mints, the quote
+is routed to the Jupiter aggregator instead of DODO (read-only pricing — no
+DODO liquidity is used). The result uses the same `Quote` shape with
+`chain_id: 0`; EVM-only fields (`router_to`, `calldata`, gas) are empty and
+`dex_sources` lists the Jupiter route venues. This is quote-only: the returned
+`quote_id` is **not** persisted, so `swap simulate/execute` don't accept it —
+those stay EVM-only. Symbols aren't resolved on SVM; pass mint addresses.
+Mixing an SPL mint with an EVM token, or using a BTC address, is rejected.
+
 If the user passes a token address in `--from` or `--to` and the quote succeeds,
 the CLI automatically persists that token's metadata locally. Future symbol
 lookups can fall back to this local store when the DODO tokenlist does not have
@@ -309,6 +362,34 @@ chainpilot swap history [--limit <N>] [--status pending|success|failed]
 ---
 
 ## `token` Subcommands
+
+### Non-EVM token support
+
+`token info`, `token price`, and `token liquidity` accept Solana SPL mints
+(base58 strings) in place of an EVM address. Detection is by address shape —
+SPL mints (32–44 base58 chars) and Bitcoin addresses (`bc1…`, `1…`, `3…`)
+are routed to dedicated paths. Symbol-only queries (e.g. `token info USDC`)
+continue to resolve against the active EVM `--chain-id` — to query Solana
+USDC, pass its mint: `chainpilot token info EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
+
+| Command | Solana | Bitcoin |
+|---|---|---|
+| `token info` | Jupiter (identity) + CoinGecko + DexScreener | not supported |
+| `token price` | CoinGecko `coins/solana/contract` + DexScreener | not supported |
+| `token liquidity` | DexScreener Solana pools | not supported |
+| `token risk` | GoPlus Solana token_security (authority-based) | not supported |
+| `token contract` / create / mint / fee | EVM-only | not supported |
+
+JSON output for SPL queries reports `chain_id: 0` (sentinel for non-EVM)
+and `chain: "Solana"`. `token contract`, `token create`, `token mint`, and
+`token fee` remain EVM-only and reject non-EVM addresses.
+
+`token risk` on Solana uses authority-based signals — mint authority,
+freeze/close authority, transfer fee, transfer hook, non-transferable —
+in place of the EVM honeypot/blacklist fields. `risk_level` collapses to
+`high` when transfer is fee-charged, hook-restricted, or
+non-transferable; `medium` when any authority is active; `low` only when
+GoPlus flags the mint as a `trusted_token` and no authority is active.
 
 ### `token info`
 
@@ -495,7 +576,27 @@ Without any aggregator key, `wallet balance` falls through to on-chain
 single-chain native balance and `wallet overview` errors out.
 
 The `sources` field in the JSON response records which provider supplied
-each value (`"debank"`, `"zerion"`, `"goldrush"`, `"onchain"`, or `null`).
+each value (`"debank"`, `"zerion"`, `"goldrush"`, `"onchain"`,
+`"mempool.space"`, or `null`).
+
+### Non-EVM wallet support
+
+`wallet` commands also accept Solana base58 pubkeys and Bitcoin mainnet
+addresses (Bech32 `bc1…`, legacy `1…` / `3…`):
+
+| Command | Solana (SVM) | Bitcoin (BVM) |
+|---|---|---|
+| `balance` | Debank → Zerion | mempool.space + CoinGecko price |
+| `overview` | Debank → Zerion | derived from balance (single asset) |
+| `pnl` | Zerion | not supported |
+| `history` | Zerion → Debank | mempool.space |
+| `labels` | Zerion only (Dune is EVM-only) | not integrated (Breadcrumbs/MetaSleuth/Arkham exist, paid/keyed) |
+| `defi` | Debank → Zerion | not supported |
+
+For Solana, **Debank is strongly recommended** — Zerion's Solana support is
+indexed asynchronously and may time out for cold/inactive addresses.
+Goldrush and the on-chain RPC fallback are EVM-only and skipped for SVM/BVM.
+`--chain-id` does not apply to SVM or BVM lookups.
 
 ### `--chain-id` semantics
 
@@ -657,6 +758,17 @@ primary source with per-portfolio-item extraction, Zerion is the fallback).
 
 ## `risk` Subcommands
 
+### Non-EVM risk support
+
+| Command | Solana | Bitcoin |
+|---|---|---|
+| `risk token` | GoPlus Solana token_security | not supported |
+| `risk wallet` | GoPlus address-reputation flags (sanctions, phishing, drainer, mixer, …) | not supported |
+| `risk approval` | not supported (SPL uses delegate accounts) | not supported (no approval primitive) |
+
+`risk approval` is rejected when **either** owner or spender is a non-EVM
+address; the message names which side triggered the rejection.
+
 ### `risk token`
 
 ```bash
@@ -671,7 +783,15 @@ Token risk: honeypot detection, ownership, liquidity flags.
 chainpilot risk wallet <ADDRESS>
 ```
 
-Wallet risk: exposure summary, high-risk approvals.
+Wallet risk: exposure summary, high-risk approvals. On EVM it combines a
+native-balance heuristic with GoPlus's malicious-address reputation, taking
+the more severe of the two as the overall level. On Solana (base58 address)
+it relies on the same chain-agnostic GoPlus library. Either way it emits one
+signal per flagged category (sanctions, phishing, stealing/drainer, mixer,
+etc.); when GoPlus has no record, EVM falls back to the balance level and SVM
+returns `LOW` with an explanatory note. Note GoPlus's reputation coverage is
+best-effort — a `LOW`/clean result means "not flagged", not "proven safe"
+(e.g. some OFAC-sanctioned contracts are not marked `sanctioned`).
 
 ### `risk approval`
 
@@ -731,6 +851,14 @@ Chain-level analytics. The `<CHAIN>` argument accepts a name, chain ID, or alias
 from free public sources (DefiLlama, CoinGecko, growthepie) — no API key required.
 Every field is rendered with a `Source` column (or `sources` object in `--json`)
 naming its data origin; fields with no available source show `N/A`.
+
+**Non-EVM coverage**: The `chain` subcommands also work for non-EVM chains via
+DefiLlama. Use `solana` / `sol` / `svm` for Solana and `bitcoin` / `btc` / `bvm`
+for Bitcoin mainnet. Only the `chain` subtree supports these — every other
+subcommand (`swap`, `token`, `wallet`, `risk`, `protocol info`) assumes an EVM
+address space and will reject Solana / Bitcoin addresses. growthepie activity
+metrics (active addresses, tx count, throughput) are EVM-only and surface as
+`N/A` on Solana / Bitcoin.
 
 ### `chain info`
 
@@ -821,6 +949,11 @@ confirm with the user before using any candidate address in a swap or approval.
 | Sepolia Testnet | 11155111 |
 
 For unsupported chain IDs, pass `--rpc-url` manually.
+
+**Non-EVM analytics**: `chain` subcommands (and `protocol info/tvl/revenue/chains`)
+additionally accept `solana` / `svm` and `bitcoin` / `bvm` — read-only via
+DefiLlama. No `--chain-id` value applies for these; the chain name is the
+argument to the `chain` subcommand itself.
 
 ---
 

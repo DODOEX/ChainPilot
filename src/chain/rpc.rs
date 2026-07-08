@@ -73,11 +73,7 @@ pub async fn estimate_gas(
     data: &str,
     value: &str,
 ) -> Result<u64> {
-    let data_bytes = if data.starts_with("0x") {
-        &data[2..]
-    } else {
-        data
-    };
+    let data_bytes = data.strip_prefix("0x").unwrap_or(data);
     let value_u256 = parse_value_u256(value)?;
 
     let input_bytes =
@@ -109,11 +105,7 @@ pub async fn get_nonce(client: &OnChainClient, address: Address) -> Result<u64> 
 
 /// Derive the wallet address from a hex private key without sending anything.
 pub fn address_from_private_key(private_key: &str) -> Result<Address> {
-    let pk = if private_key.starts_with("0x") {
-        &private_key[2..]
-    } else {
-        private_key
-    };
+    let pk = private_key.strip_prefix("0x").unwrap_or(private_key);
     let signer: PrivateKeySigner = pk
         .parse()
         .map_err(|_| ChainError::InvalidPrivateKey(private_key.to_string()))?;
@@ -122,11 +114,7 @@ pub fn address_from_private_key(private_key: &str) -> Result<Address> {
 
 pub fn resolve_signer(config: &AppConfig) -> Result<PrivateKeySigner> {
     if let Some(private_key) = config.private_key.as_deref() {
-        let pk = if private_key.starts_with("0x") {
-            &private_key[2..]
-        } else {
-            private_key
-        };
+        let pk = private_key.strip_prefix("0x").unwrap_or(private_key);
         return pk
             .parse()
             .map_err(|_| ChainError::InvalidPrivateKey(private_key.to_string()));
@@ -170,11 +158,7 @@ pub async fn send_tx(
 
     let value_u256 = parse_value_u256(value_hex)?;
 
-    let data_hex = if data.starts_with("0x") {
-        &data[2..]
-    } else {
-        data
-    };
+    let data_hex = data.strip_prefix("0x").unwrap_or(data);
     let data_bytes =
         hex::decode(data_hex).map_err(|_| ChainError::Rpc("invalid calldata hex".to_string()))?;
 

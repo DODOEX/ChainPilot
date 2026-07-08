@@ -1,9 +1,11 @@
 //! On-chain data access via alloy Provider.
 
+mod address;
 mod erc20;
 mod rpc;
 mod token_factory;
 
+pub use address::AddressRef;
 pub use erc20::{
     encode_abandon_ownership_calldata, encode_mint_calldata, get_allowance, get_balance,
     get_token_info, inspect_token_contract,

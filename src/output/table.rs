@@ -44,7 +44,6 @@ impl TableRenderable for crate::models::quote::Quote {
             self.to_token.decimals,
             &self.to_token.symbol,
         );
-        let value_display = format_native_value(&self.value);
 
         let mut table = Table::new();
         table.set_header(vec!["Field", "Value"]);
@@ -66,10 +65,15 @@ impl TableRenderable for crate::models::quote::Quote {
         ]);
         table.add_row(vec!["Price Impact", &format!("{}%", self.price_impact_pct)]);
         table.add_row(vec!["Min Received", &min_received]);
-        table.add_row(vec!["Router", &self.router_to]);
-        table.add_row(vec!["Value", &value_display]);
-        table.add_row(vec!["Est. Gas", &estimated_gas]);
-        table.add_row(vec!["Gas Limit", &gas_limit]);
+        // Router / native value / gas are EVM settlement concepts. Skip them
+        // for non-EVM quotes (chain_id == 0 sentinel, e.g. Solana via Jupiter)
+        // where they're always empty/zero and the ETH/wei labels are wrong.
+        if self.chain_id != 0 {
+            table.add_row(vec!["Router", &self.router_to]);
+            table.add_row(vec!["Value", &format_native_value(&self.value)]);
+            table.add_row(vec!["Est. Gas", &estimated_gas]);
+            table.add_row(vec!["Gas Limit", &gas_limit]);
+        }
         table.add_row(vec![
             "Expires",
             &self.expires_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),

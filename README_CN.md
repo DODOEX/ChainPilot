@@ -12,7 +12,8 @@
 - 管理 ERC-20 授权（approve / revoke）
 - 查询链上代币元数据与钱包余额
 - 通过 DODO ERC20V3Factory 创建 ERC-20、给可增发代币铸币、放弃所有权
-- 对代币、钱包和授权额度进行风险分析
+- 对代币、钱包和授权额度进行风险分析（钱包风险结合原生余额启发式判断与 GoPlus 恶意地址信誉）
+- 对非 EVM 链的只读支持 —— Solana（SVM）与比特币主网（BVM）—— 覆盖 `chain`、`protocol`、`token`、`wallet`、`risk` 查询，并通过 Jupiter 提供 Solana 兑换报价
 - 机器可读的 JSON 输出（`--json`），适用于脚本和 Agent 流水线
 
 ## 安装
@@ -138,6 +139,33 @@ RUST_LOG=debug chainpilot ...
 | Sepolia Testnet     | 11155111   |
 
 不在列表中的链，请手动传入 `--rpc-url`。
+
+## 非 EVM 支持（Solana / 比特币）
+
+ChainPilot 的**只读**命令同样支持 Solana（SVM）和比特币主网（BVM）。路由按
+地址形态自动判断 —— 直接传入 SPL mint 或 BTC 地址，或在分析类命令中用
+`solana` / `svm` 和 `bitcoin` / `bvm` 作为链别名。这些查询不使用 `--chain-id`。
+
+兑换的**执行**（simulate / execute / status / history）、ERC-20 授权，以及
+代币 create / mint / renounce 按设计**仅限 EVM**。唯一的只读例外是
+`swap quote`：当 `--from` 与 `--to` 都是 SPL mint 时，会通过 Jupiter 聚合器
+对 Solana 路由计价（不使用 DODO 流动性，且返回的报价无法 simulate 或 execute）。
+
+| 命令 | EVM | Solana（SVM） | 比特币（BVM） |
+|---|---|---|---|
+| `chain` / `protocol` 分析 | ✓ | ✓ DefiLlama | ✓ DefiLlama |
+| `wallet balance` / `overview` | ✓ | ✓ Debank → Zerion | ✓ mempool.space |
+| `wallet history` | ✓ | ✓ Zerion → Debank | ✓ mempool.space |
+| `wallet pnl` / `defi` | ✓ | ✓ Zerion / Debank | ✗ |
+| `token info` / `price` / `liquidity` | ✓ | ✓ Jupiter + CoinGecko + DexScreener | ✗ |
+| `token risk` / `risk token` | ✓ GoPlus | ✓ GoPlus Solana（基于权限） | ✗ |
+| `risk wallet` | ✓ 余额 + GoPlus 信誉 | ✓ GoPlus 信誉 | ✗ |
+| `swap quote` | ✓ DODO | ✓ Jupiter（只读） | ✗ |
+| `swap simulate / execute / status`、授权、代币 create/mint | ✓ | ✗ 仅 EVM | ✗ 仅 EVM |
+
+对于 Solana 钱包查询，**建议优先用 Debank 而非 Zerion** —— Zerion 的 Solana
+索引是异步的，对冷钱包可能超时。比特币实体标签暂未接入（mempool.space 只返回
+原始链上数据）。
 
 ## 典型兑换流程
 

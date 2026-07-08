@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use crate::api::{
     debank_chain_to_id, ApiClients, GoldrushChainBalance, ZerionPortfolio, ZerionPositionRecord,
 };
-use crate::chain::{get_eth_balance, OnChainClient};
+use crate::chain::{get_eth_balance, AddressRef, OnChainClient};
 use crate::cli::wallet::{
     BalanceArgs, DefiArgs, HistoryArgs, LabelsArgs, OverviewArgs, PnlArgs, WalletAction, WalletCmd,
 };
@@ -26,6 +26,23 @@ use tokio::task::JoinSet;
 const GOLDRUSH_FAN_OUT_CONCURRENCY: usize = 5;
 use crate::output::{OutputContext, OutputMode};
 use crate::store::QuoteStore;
+
+/// Standard error for wallet commands that have no data source on Bitcoin
+/// mainnet. The label is the command name (e.g. "wallet pnl") so the message
+/// reads naturally when surfaced.
+fn unsupported_on_bvm(command: &str) -> ChainError {
+    ChainError::Config(format!(
+        "{command} is not supported on Bitcoin mainnet — no public data source provides this"
+    ))
+}
+
+/// Format a unix timestamp as an RFC3339-ish string for transaction history.
+/// Returns the raw integer if the conversion overflows chrono's range.
+fn format_bitcoin_time(unix_secs: u64) -> String {
+    chrono::DateTime::from_timestamp(unix_secs as i64, 0)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_else(|| unix_secs.to_string())
+}
 
 pub async fn handle(
     cmd: WalletCmd,
@@ -53,22 +70,117 @@ async fn balance(
     let chain_id = config.chain_id;
     let ctx = OutputContext::new(chain_id, false);
 
-    if args.address.parse::<Address>().is_err() {
-        return Ok(crate::output::print_output::<WalletBalance>(
-            Err(ChainError::InvalidAddress(args.address.clone())),
-            "wallet.balance",
-            output_mode,
-            ctx,
-        ));
-    }
+    let addr = match AddressRef::parse(&args.address) {
+        Ok(a) => a,
+        Err(e) => {
+            return Ok(crate::output::print_output::<WalletBalance>(
+                Err(e),
+                "wallet.balance",
+                output_mode,
+                ctx,
+            ))
+        }
+    };
 
-    let result = build_balance(&args, api, config).await;
+    let result = match addr {
+        AddressRef::Evm(_) => build_balance(&args, api, config).await,
+        AddressRef::Svm(_) => build_balance_svm(&args, api).await,
+        AddressRef::Bvm(_) => build_balance_bvm(&args, api).await,
+    };
     Ok(crate::output::print_output::<WalletBalance>(
         result,
         "wallet.balance",
         output_mode,
         ctx,
     ))
+}
+
+/// SVM (Solana) balance: Debank → Zerion. The Goldrush and on-chain RPC
+/// fallbacks used by [`build_balance`] are EVM-only, so we skip them and
+/// surface a clear "needs an API key" error if neither aggregator is configured.
+async fn build_balance_svm(args: &BalanceArgs, api: &ApiClients) -> Result<WalletBalance> {
+    let mut last_err: Option<ChainError> = None;
+    if api.debank.is_configured() {
+        match fetch_balance_from_debank(args, api, None).await {
+            Ok(b) => return Ok(b),
+            Err(e) => {
+                tracing::warn!("Debank SVM balance failed: {e}. Falling back to Zerion.");
+                last_err = Some(e);
+            }
+        }
+    }
+    if api.zerion.is_configured() {
+        match fetch_balance_from_zerion(args, api, None).await {
+            Ok(b) => return Ok(b),
+            Err(e) => {
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        ChainError::Config(
+            "wallet balance on Solana requires DEBANK_API_KEY or ZERION_API_KEY. \
+             Run: chainpilot config set debank_api_key <key> (preferred) or \
+             chainpilot config set zerion_api_key <key>"
+                .to_string(),
+        )
+    }))
+}
+
+/// BVM (Bitcoin mainnet) balance via mempool.space, with a CoinGecko BTC price
+/// attached opportunistically. The CoinGecko call can fail or be rate-limited;
+/// when it does, the amount field stays populated and USD fields surface as
+/// `N/A` rather than dropping the row.
+async fn build_balance_bvm(args: &BalanceArgs, api: &ApiClients) -> Result<WalletBalance> {
+    let balance = api.mempool.address_balance(&args.address).await?;
+    let total_btc = balance.total_btc();
+    let btc_price = api
+        .chain
+        .fetch_native_price("Bitcoin", Some("bitcoin"), None)
+        .await;
+    let value_usd = btc_price.map(|p| total_btc * p);
+
+    // Mirror the EVM `build_balance` asset filter: drop the row when its USD
+    // value is below `--min-usd`. `unwrap_or(0.0)` keeps a priced-N/A row
+    // visible at the default `min_usd == 0.0` rather than dropping it.
+    let mut assets = Vec::new();
+    if total_btc > 0.0 && value_usd.unwrap_or(0.0) >= args.min_usd {
+        assets.push(WalletAsset {
+            chain: "Bitcoin".to_string(),
+            chain_id: None,
+            symbol: "BTC".to_string(),
+            name: "Bitcoin".to_string(),
+            address: args.address.clone(),
+            amount: total_btc,
+            price_usd: btc_price,
+            value_usd,
+        });
+    }
+
+    let mut chain_allocation = Vec::new();
+    if let Some(v) = value_usd {
+        if v >= args.min_usd {
+            chain_allocation.push(ChainAllocation {
+                chain: "Bitcoin".to_string(),
+                chain_id: None,
+                balance_usd: v,
+                percentage: 100.0,
+            });
+        }
+    }
+
+    let price_source = btc_price.map(|_| "mempool.space + coingecko".to_string());
+    Ok(WalletBalance {
+        wallet: args.address.clone(),
+        total_balance_usd: value_usd,
+        assets,
+        chain_allocation,
+        sources: WalletBalanceSources {
+            total_balance_usd: price_source.clone(),
+            assets: Some("mempool.space".to_string()),
+            chain_allocation: price_source,
+        },
+    })
 }
 
 async fn build_balance(
@@ -340,22 +452,111 @@ async fn overview(
     let chain_id = config.chain_id;
     let ctx = OutputContext::new(chain_id, false);
 
-    if args.address.parse::<Address>().is_err() {
-        return Ok(crate::output::print_output::<WalletOverview>(
-            Err(ChainError::InvalidAddress(args.address.clone())),
-            "wallet.overview",
-            output_mode,
-            ctx,
-        ));
-    }
+    let addr = match AddressRef::parse(&args.address) {
+        Ok(a) => a,
+        Err(e) => {
+            return Ok(crate::output::print_output::<WalletOverview>(
+                Err(e),
+                "wallet.overview",
+                output_mode,
+                ctx,
+            ))
+        }
+    };
 
-    let result = build_overview(&args, api, config).await;
+    let result = match addr {
+        AddressRef::Evm(_) => build_overview(&args, api, config).await,
+        AddressRef::Svm(_) => build_overview_svm(&args, api).await,
+        AddressRef::Bvm(_) => build_overview_bvm(&args, api).await,
+    };
     Ok(crate::output::print_output::<WalletOverview>(
         result,
         "wallet.overview",
         output_mode,
         ctx,
     ))
+}
+
+/// SVM overview: Debank → Zerion. Goldrush is EVM-only and skipped.
+async fn build_overview_svm(args: &OverviewArgs, api: &ApiClients) -> Result<WalletOverview> {
+    let mut last_err: Option<ChainError> = None;
+    if api.debank.is_configured() {
+        match build_overview_from_debank(args, api, None).await {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                tracing::warn!("Debank SVM overview failed: {e}. Falling back to Zerion.");
+                last_err = Some(e);
+            }
+        }
+    }
+    if api.zerion.is_configured() {
+        match build_overview_from_zerion(args, api, None).await {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        ChainError::Config(
+            "wallet overview on Solana requires DEBANK_API_KEY or ZERION_API_KEY"
+                .to_string(),
+        )
+    }))
+}
+
+/// BVM overview: a Bitcoin wallet has a single asset (BTC), so "overview"
+/// collapses to a one-row balance with allocations pinned to 100% on BTC.
+/// We build it on top of [`build_balance_bvm`] to keep the price/balance
+/// fetch in one place.
+async fn build_overview_bvm(args: &OverviewArgs, api: &ApiClients) -> Result<WalletOverview> {
+    let balance_args = BalanceArgs {
+        address: args.address.clone(),
+        min_usd: 0.0,
+    };
+    let balance = build_balance_bvm(&balance_args, api).await?;
+
+    let token_allocation: Vec<TokenAllocation> = balance
+        .assets
+        .iter()
+        .filter_map(|a| {
+            a.value_usd.map(|v| TokenAllocation {
+                symbol: a.symbol.clone(),
+                name: a.name.clone(),
+                balance_usd: v,
+                percentage: 100.0,
+            })
+        })
+        .collect();
+
+    let top_holdings: Vec<TopHolding> = balance
+        .assets
+        .iter()
+        .take(args.top)
+        .map(|a| TopHolding {
+            symbol: a.symbol.clone(),
+            name: a.name.clone(),
+            chain: a.chain.clone(),
+            amount: a.amount,
+            value_usd: a.value_usd.unwrap_or(0.0),
+        })
+        .collect();
+
+    Ok(WalletOverview {
+        wallet: args.address.clone(),
+        total_balance_usd: balance.total_balance_usd,
+        chain_allocation: balance.chain_allocation,
+        token_allocation,
+        active_protocols: Vec::new(),
+        top_holdings,
+        sources: WalletOverviewSources {
+            total_balance_usd: balance.sources.total_balance_usd.clone(),
+            chain_allocation: balance.sources.chain_allocation.clone(),
+            token_allocation: balance.sources.assets.clone(),
+            active_protocols: None,
+            top_holdings: balance.sources.assets,
+        },
+    })
 }
 
 async fn build_overview(
@@ -950,16 +1151,24 @@ async fn pnl(
     let chain_id = config.chain_id;
     let ctx = OutputContext::new(chain_id, false);
 
-    if args.address.parse::<Address>().is_err() {
-        return Ok(crate::output::print_output::<WalletPnl>(
-            Err(ChainError::InvalidAddress(args.address.clone())),
-            "wallet.pnl",
-            output_mode,
-            ctx,
-        ));
-    }
+    let addr = match AddressRef::parse(&args.address) {
+        Ok(a) => a,
+        Err(e) => {
+            return Ok(crate::output::print_output::<WalletPnl>(
+                Err(e),
+                "wallet.pnl",
+                output_mode,
+                ctx,
+            ))
+        }
+    };
 
-    let result = build_pnl(&args, api).await;
+    let result = match addr {
+        // Zerion's /pnl/ endpoint covers both EVM and Solana wallets when the
+        // address is passed verbatim, so EVM and SVM share the same path.
+        AddressRef::Evm(_) | AddressRef::Svm(_) => build_pnl(&args, api).await,
+        AddressRef::Bvm(_) => Err(unsupported_on_bvm("wallet pnl")),
+    };
     Ok(crate::output::print_output::<WalletPnl>(
         result,
         "wallet.pnl",
@@ -999,22 +1208,75 @@ async fn history(
     let chain_id = config.chain_id;
     let ctx = OutputContext::new(chain_id, false);
 
-    if args.address.parse::<Address>().is_err() {
-        return Ok(crate::output::print_output::<WalletHistory>(
-            Err(ChainError::InvalidAddress(args.address.clone())),
-            "wallet.history",
-            output_mode,
-            ctx,
-        ));
-    }
+    let addr = match AddressRef::parse(&args.address) {
+        Ok(a) => a,
+        Err(e) => {
+            return Ok(crate::output::print_output::<WalletHistory>(
+                Err(e),
+                "wallet.history",
+                output_mode,
+                ctx,
+            ))
+        }
+    };
 
-    let result = build_history(&args, api).await;
+    let result = match addr {
+        AddressRef::Evm(_) | AddressRef::Svm(_) => build_history(&args, api).await,
+        AddressRef::Bvm(_) => build_history_bvm(&args, api).await,
+    };
     Ok(crate::output::print_output::<WalletHistory>(
         result,
         "wallet.history",
         output_mode,
         ctx,
     ))
+}
+
+/// BVM history via mempool.space. Each row's `action` reflects net flow vs
+/// the queried address (`receive` if positive, `send` otherwise) since the
+/// Bitcoin UTXO model has no protocol-level "swap" semantics.
+async fn build_history_bvm(args: &HistoryArgs, api: &ApiClients) -> Result<WalletHistory> {
+    let limit = args.limit.clamp(1, 50) as usize;
+    let txs = api.mempool.address_txs(&args.address, limit).await?;
+
+    // Price BTC once and reuse it for both `fee_usd` (always in BTC) and any
+    // future per-row USD valuation. A missing price degrades the row to
+    // amount-only, never drops it.
+    let btc_price = api
+        .chain
+        .fetch_native_price("Bitcoin", Some("bitcoin"), None)
+        .await;
+
+    let transactions = txs
+        .into_iter()
+        .map(|t| {
+            let action = if t.net_btc >= 0.0 { "receive" } else { "send" }.to_string();
+            let time = t
+                .block_time
+                .map(format_bitcoin_time)
+                .unwrap_or_else(|| "pending".to_string());
+            let fee_usd = btc_price.map(|p| t.fee_btc * p);
+            let value_usd = btc_price.map(|p| t.net_btc.abs() * p);
+            WalletTransaction {
+                tx_hash: t.txid,
+                time,
+                action,
+                status: Some(if t.confirmed { "confirmed" } else { "pending" }.to_string()),
+                fee_usd,
+                token_in: None,
+                token_out: None,
+                value_usd,
+                amount: Some(t.net_btc),
+                success: Some(t.confirmed),
+            }
+        })
+        .collect();
+
+    Ok(WalletHistory {
+        wallet: args.address.clone(),
+        transactions,
+        source: "mempool.space".to_string(),
+    })
 }
 
 async fn build_history(args: &HistoryArgs, api: &ApiClients) -> Result<WalletHistory> {
@@ -1094,16 +1356,25 @@ async fn labels(
     let chain_id = config.chain_id;
     let ctx = OutputContext::new(chain_id, false);
 
-    if args.address.parse::<Address>().is_err() {
-        return Ok(crate::output::print_output::<WalletLabels>(
-            Err(ChainError::InvalidAddress(args.address.clone())),
-            "wallet.labels",
-            output_mode,
-            ctx,
-        ));
-    }
+    let addr = match AddressRef::parse(&args.address) {
+        Ok(a) => a,
+        Err(e) => {
+            return Ok(crate::output::print_output::<WalletLabels>(
+                Err(e),
+                "wallet.labels",
+                output_mode,
+                ctx,
+            ))
+        }
+    };
 
-    let result = build_labels(&args, api).await;
+    let result = match addr {
+        AddressRef::Evm(_) => build_labels(&args, api).await,
+        // Dune is EVM-only; Zerion derives labels from positions and works on
+        // Solana, so use the Zerion path directly without the Dune fallback.
+        AddressRef::Svm(_) => build_labels_from_zerion(&args, api).await,
+        AddressRef::Bvm(_) => Err(unsupported_on_bvm("wallet labels")),
+    };
     Ok(crate::output::print_output::<WalletLabels>(
         result,
         "wallet.labels",
@@ -1196,22 +1467,57 @@ async fn defi(
     let chain_id = config.chain_id;
     let ctx = OutputContext::new(chain_id, false);
 
-    if args.address.parse::<Address>().is_err() {
-        return Ok(crate::output::print_output::<WalletDefi>(
-            Err(ChainError::InvalidAddress(args.address.clone())),
-            "wallet.defi",
-            output_mode,
-            ctx,
-        ));
-    }
+    let addr = match AddressRef::parse(&args.address) {
+        Ok(a) => a,
+        Err(e) => {
+            return Ok(crate::output::print_output::<WalletDefi>(
+                Err(e),
+                "wallet.defi",
+                output_mode,
+                ctx,
+            ))
+        }
+    };
 
-    let result = build_defi(&args, api, config).await;
+    let result = match addr {
+        AddressRef::Evm(_) => build_defi(&args, api, config).await,
+        AddressRef::Svm(_) => build_defi_svm(&args, api).await,
+        AddressRef::Bvm(_) => Err(unsupported_on_bvm("wallet defi")),
+    };
     Ok(crate::output::print_output::<WalletDefi>(
         result,
         "wallet.defi",
         output_mode,
         ctx,
     ))
+}
+
+/// SVM DeFi positions: Debank → Zerion, no chain filter (the EVM `--chain-id`
+/// does not apply to Solana).
+async fn build_defi_svm(args: &DefiArgs, api: &ApiClients) -> Result<WalletDefi> {
+    let mut last_err: Option<ChainError> = None;
+    if api.debank.is_configured() {
+        match build_defi_from_debank(args, api, None).await {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                tracing::warn!("Debank SVM DeFi failed: {e}. Falling back to Zerion.");
+                last_err = Some(e);
+            }
+        }
+    }
+    if api.zerion.is_configured() {
+        match build_defi_from_zerion(args, api, None).await {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        ChainError::Config(
+            "wallet defi on Solana requires DEBANK_API_KEY or ZERION_API_KEY".to_string(),
+        )
+    }))
 }
 
 async fn build_defi(args: &DefiArgs, api: &ApiClients, config: &AppConfig) -> Result<WalletDefi> {

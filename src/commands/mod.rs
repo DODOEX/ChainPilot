@@ -55,7 +55,7 @@ pub async fn resolve_token(
 
     // 0. Reject unsupported chains up front for a clear error message.
     if crate::config::chain_config(chain_id).is_none() {
-        return Err(crate::error::ChainError::UnsupportedChain(chain_id).into());
+        return Err(crate::error::ChainError::UnsupportedChain(chain_id));
     }
 
     // 1. Address input → native sentinel or on-chain lookup.
@@ -119,7 +119,7 @@ pub async fn resolve_token(
         return Ok(token);
     }
 
-    Err(crate::error::ChainError::TokenNotFound(input.to_string()).into())
+    Err(crate::error::ChainError::TokenNotFound(input.to_string()))
 }
 
 pub fn parse_display_amount(amount: &str) -> Result<f64> {
@@ -133,33 +133,31 @@ pub fn to_raw_amount(amount: &str, decimals: u8) -> Result<String> {
     let amount = amount.trim();
     if amount.is_empty() {
         return Err(
-            crate::error::ChainError::InvalidAmount("amount cannot be empty".to_string()).into(),
+            crate::error::ChainError::InvalidAmount("amount cannot be empty".to_string()),
         );
     }
     if amount.starts_with('-') {
         return Err(crate::error::ChainError::InvalidAmount(
             "amount cannot be negative".to_string(),
-        )
-        .into());
+        ));
     }
 
     let mut parts = amount.split('.');
     let int_part = parts.next().unwrap_or_default();
     let frac_part = parts.next().unwrap_or_default();
     if parts.next().is_some() {
-        return Err(crate::error::ChainError::InvalidAmount(amount.to_string()).into());
+        return Err(crate::error::ChainError::InvalidAmount(amount.to_string()));
     }
     if !int_part.chars().all(|c| c.is_ascii_digit())
         || !frac_part.chars().all(|c| c.is_ascii_digit())
     {
-        return Err(crate::error::ChainError::InvalidAmount(amount.to_string()).into());
+        return Err(crate::error::ChainError::InvalidAmount(amount.to_string()));
     }
     if frac_part.len() > decimals as usize {
         return Err(crate::error::ChainError::InvalidAmount(format!(
             "too many decimal places for token precision {}",
             decimals
-        ))
-        .into());
+        )));
     }
 
     let int_normalized = int_part.trim_start_matches('0');
