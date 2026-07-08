@@ -30,10 +30,9 @@ impl AddressRef {
     ///
     /// Order of checks matters: EVM hex is unambiguous (`0x` prefix), Bitcoin
     /// Bech32 is unambiguous (`bc1`/`tb1` prefix). The legacy Bitcoin / Solana
-    /// boundary overlaps on length 32–35 chars when leading byte happens to
-    /// encode to `1` or `3`; we resolve that by requiring legacy Bitcoin to
-    /// be ≤ 35 chars (real BTC P2PKH/P2SH addresses are 26–35), so a 44-char
-    /// Solana pubkey starting with `1` still classifies as SVM.
+    /// boundary overlaps on character length (BTC 26–35, Solana 32–44), so we
+    /// resolve it by the DECODED payload length — BTC P2PKH/P2SH decode to 25
+    /// bytes, Solana pubkeys to 32 — rather than a fragile length+prefix guess.
     pub fn parse(input: &str) -> Result<Self> {
         let trimmed = input.trim();
         if trimmed.is_empty() {
@@ -67,19 +66,21 @@ impl AddressRef {
             return Err(ChainError::InvalidAddress(input.to_string()));
         }
 
-        // 4. BTC legacy: starts with `1` (P2PKH) or `3` (P2SH), length 26–35.
-        let starts_btc_legacy = trimmed.starts_with('1') || trimmed.starts_with('3');
-        if starts_btc_legacy && trimmed.len() <= 35 {
-            return Ok(AddressRef::Bvm(trimmed.to_string()));
+        // 4 & 5. BTC legacy vs Solana pubkey. Their character-length ranges
+        // overlap (BTC 26–35, Solana 32–44), so a short Solana pubkey starting
+        // with `1`/`3` — e.g. the System Program `1111…1111` (32 chars) — would
+        // be mis-tagged as Bitcoin by a length+prefix heuristic. Disambiguate
+        // by the decoded PAYLOAD length instead: BTC P2PKH/P2SH decode to 25
+        // bytes (1 version + 20 hash + 4 checksum), Solana pubkeys to 32 bytes.
+        // Decoding also rejects strings that merely look base58 but aren't a
+        // valid address of either length.
+        match base58_decode(trimmed) {
+            Some(bytes) if bytes.len() == 25 && matches!(bytes.first(), Some(0x00) | Some(0x05)) => {
+                Ok(AddressRef::Bvm(trimmed.to_string()))
+            }
+            Some(bytes) if bytes.len() == 32 => Ok(AddressRef::Svm(trimmed.to_string())),
+            _ => Err(ChainError::InvalidAddress(input.to_string())),
         }
-
-        // 5. Solana base58 pubkey: 32 bytes, 43–44 chars when encoded.
-        // We accept 32–44 to be lenient (some encoders drop leading zeros).
-        if trimmed.len() >= 32 && trimmed.len() <= 44 {
-            return Ok(AddressRef::Svm(trimmed.to_string()));
-        }
-
-        Err(ChainError::InvalidAddress(input.to_string()))
     }
 
     /// String form suitable for echoing back to the user and for use as a
@@ -111,6 +112,36 @@ const BASE58_ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghij
 
 fn is_base58(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| BASE58_ALPHABET.contains(&b))
+}
+
+/// Decode a base58 string to its raw bytes (Bitcoin/Base58 alphabet, no
+/// checksum verification). Returns `None` if any char is outside the alphabet.
+/// Used only to disambiguate address families by decoded length, so the exact
+/// bytes past the length/version aren't validated further.
+fn base58_decode(s: &str) -> Option<Vec<u8>> {
+    let mut bytes: Vec<u8> = Vec::with_capacity(s.len());
+    for c in s.bytes() {
+        let mut carry = BASE58_ALPHABET.iter().position(|&b| b == c)? as u32;
+        for byte in bytes.iter_mut() {
+            carry += (*byte as u32) * 58;
+            *byte = (carry & 0xff) as u8;
+            carry >>= 8;
+        }
+        while carry > 0 {
+            bytes.push((carry & 0xff) as u8);
+            carry >>= 8;
+        }
+    }
+    // Each leading '1' encodes one leading zero byte.
+    for c in s.bytes() {
+        if c == b'1' {
+            bytes.push(0);
+        } else {
+            break;
+        }
+    }
+    bytes.reverse();
+    Some(bytes)
 }
 
 #[cfg(test)]
@@ -171,11 +202,21 @@ mod tests {
     }
 
     #[test]
-    fn long_svm_pubkey_starting_with_one_is_not_btc() {
-        // Synthetic 44-char base58 starting with `1` — must classify as SVM,
-        // not BTC, because BTC legacy addrs are ≤ 35 chars.
-        let svm_like = "1".to_string() + &"A".repeat(43);
-        let a = AddressRef::parse(&svm_like).unwrap();
+    fn short_svm_pubkey_starting_with_one_is_not_btc() {
+        // The System Program: a real 32-char Solana pubkey (32 zero bytes)
+        // that starts with `1` and is well inside BTC's 26–35 char range.
+        // Decoded-length classification must still route it to SVM (32 bytes),
+        // not BTC (25 bytes).
+        let system_program = "11111111111111111111111111111111";
+        let a = AddressRef::parse(system_program).unwrap();
         assert!(matches!(a, AddressRef::Svm(_)));
+    }
+
+    #[test]
+    fn rejects_base58_of_wrong_decoded_length() {
+        // Looks base58 but decodes to neither a 25-byte BTC payload nor a
+        // 32-byte Solana pubkey — must be rejected, not silently accepted.
+        assert!(AddressRef::parse("11").is_err());
+        assert!(AddressRef::parse("2g").is_err());
     }
 }

@@ -678,11 +678,17 @@ impl TokenMetadataClient {
         // GoPlus's `trusted_token` (1 = on a curated list) is the closest
         // SVM signal to "low risk overall". Without it, severity stays None
         // so the user sees `N/A` rather than a guessed level.
+        //
+        // A transfer restriction (fee / hook / non-transferable) is the gravest
+        // SVM signal and MUST outrank `trusted_token` — a curated Token-2022
+        // mint can still charge a fee, and reporting it `low` while
+        // `transfer_restricted = true` would contradict itself. So check the
+        // restriction first, then trusted-low, then the softer authority level.
         let trusted = data.trusted_token == Some(1);
-        let level = if trusted && !mintable.unwrap_or(false) && !owner_privileged {
-            Some("low".to_string())
-        } else if has_fee || has_hook || non_transferable {
+        let level = if has_fee || has_hook || non_transferable {
             Some("high".to_string())
+        } else if trusted && !mintable.unwrap_or(false) && !owner_privileged {
+            Some("low".to_string())
         } else if mintable.unwrap_or(false) || owner_privileged {
             Some("medium".to_string())
         } else {
@@ -893,8 +899,14 @@ impl TokenMetadataClient {
     /// merges in price, market cap, top liquidity, etc. `is_native` logic and
     /// `goplus` risk lookups don't apply on Solana and are skipped.
     pub async fn enrich_svm(&self, mut info: TokenInfo) -> TokenInfo {
-        let coingecko = self.fetch_coingecko("solana", &info.address).await.ok();
-        let dexscreener = self.fetch_dexscreener(&info.address).await.ok();
+        // CoinGecko and DexScreener both key on the bare mint with no data
+        // dependency between them, so fetch them concurrently.
+        let (coingecko, dexscreener) = tokio::join!(
+            self.fetch_coingecko("solana", &info.address),
+            self.fetch_dexscreener(&info.address),
+        );
+        let coingecko = coingecko.ok();
+        let dexscreener = dexscreener.ok();
 
         let mut patch = TokenMetadataPatch::default();
         apply_coingecko(&mut patch, coingecko);
@@ -909,8 +921,13 @@ impl TokenMetadataClient {
     pub async fn fetch_price_svm(&self, mint: &str, symbol: &str) -> crate::models::token::TokenPrice {
         use crate::models::token::{TokenPrice, TokenPriceSources};
 
-        let coingecko = self.fetch_coingecko("solana", mint).await.ok();
-        let dexscreener = self.fetch_dexscreener(mint).await.ok();
+        // Independent lookups on the bare mint — run concurrently.
+        let (coingecko, dexscreener) = tokio::join!(
+            self.fetch_coingecko("solana", mint),
+            self.fetch_dexscreener(mint),
+        );
+        let coingecko = coingecko.ok();
+        let dexscreener = dexscreener.ok();
 
         let mut price = TokenPrice {
             address: mint.to_string(),
@@ -1092,27 +1109,28 @@ fn apply_coingecko(patch: &mut TokenMetadataPatch, token: Option<CoinGeckoToken>
         if let Some(url) = first_non_empty(links.homepage) {
             patch.website = Some((url, "coingecko".to_string()));
         }
-        let mut social = TokenSocialLinks::default();
-        social.x = non_empty(links.twitter_screen_name).map(|name| {
-            if name.starts_with("http") {
-                name
-            } else {
-                format!("https://x.com/{}", name.trim_start_matches('@'))
-            }
-        });
-        social.telegram = non_empty(links.telegram_channel_identifier).map(|name| {
-            if name.starts_with("http") {
-                name
-            } else {
-                format!("https://t.me/{}", name.trim_start_matches('@'))
-            }
-        });
-        social.discord = first_non_empty(links.chat_url);
-        social.github = links
-            .repos_url
-            .and_then(|repos| first_non_empty(repos.github));
-        social.docs = first_non_empty(links.blockchain_site)
-            .or_else(|| first_non_empty(links.official_forum_url));
+        let social = TokenSocialLinks {
+            x: non_empty(links.twitter_screen_name).map(|name| {
+                if name.starts_with("http") {
+                    name
+                } else {
+                    format!("https://x.com/{}", name.trim_start_matches('@'))
+                }
+            }),
+            telegram: non_empty(links.telegram_channel_identifier).map(|name| {
+                if name.starts_with("http") {
+                    name
+                } else {
+                    format!("https://t.me/{}", name.trim_start_matches('@'))
+                }
+            }),
+            discord: first_non_empty(links.chat_url),
+            github: links
+                .repos_url
+                .and_then(|repos| first_non_empty(repos.github)),
+            docs: first_non_empty(links.blockchain_site)
+                .or_else(|| first_non_empty(links.official_forum_url)),
+        };
         if has_social_links(&social) {
             patch.social_links = Some((social, "coingecko".to_string()));
         }

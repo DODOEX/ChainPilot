@@ -146,10 +146,16 @@ impl JupiterClient {
             ChainError::Config(format!("Jupiter token response could not be parsed: {e}"))
         })?;
 
-        let chosen = match parsed.iter().position(|t| t.id == mint) {
-            Some(i) => Some(parsed.swap_remove(i)),
-            None => parsed.into_iter().next(),
-        };
+        // `/tokens/v2/search` fuzzy-matches, so it can return unrelated tokens
+        // for a mint it doesn't index. Require an exact `id == mint` match —
+        // returning a fuzzy first hit here would silently resolve a different
+        // token's decimals/address into `swap quote` and `token info`. A miss
+        // returns `None`, letting callers fall through to CoinGecko/DexScreener
+        // or reject an unroutable mint.
+        let chosen = parsed
+            .iter()
+            .position(|t| t.id == mint)
+            .map(|i| parsed.swap_remove(i));
 
         Ok(chosen.map(|t| JupiterToken {
             address: t.id,

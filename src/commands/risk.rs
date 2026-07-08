@@ -143,14 +143,6 @@ async fn token_risk_svm(
         .unwrap_or_default();
     let token_risk = api.token_metadata.fetch_risk_svm(mint, &symbol).await;
 
-    let overall_risk = match token_risk.risk_level.as_deref() {
-        Some("high") => RiskLevel::High,
-        Some("medium") => RiskLevel::Medium,
-        Some("critical") => RiskLevel::Critical,
-        Some("low") => RiskLevel::Low,
-        _ => RiskLevel::Low,
-    };
-
     let mut signals = Vec::new();
     if token_risk.mintable == Some(true) {
         signals.push(RiskSignal {
@@ -182,6 +174,12 @@ async fn token_risk_svm(
             }),
         });
     }
+
+    // Derive the overall level from the highest-severity signal (as the EVM
+    // and SVM wallet paths do) rather than the raw `risk_level` string, so the
+    // headline can never be milder than a signal it lists (e.g. a High
+    // `transfer_restricted` signal on a `trusted_token` mint).
+    let overall_risk = overall_from_signals(&signals);
 
     let report = RiskReport {
         subject: mint.to_string(),

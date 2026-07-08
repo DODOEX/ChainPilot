@@ -33,7 +33,7 @@ fn default_config_env_path() -> std::path::PathBuf {
 }
 
 fn load_config_env_from_path(config_path: &std::path::Path) {
-    let content = match std::fs::read_to_string(&config_path) {
+    let content = match std::fs::read_to_string(config_path) {
         Ok(c) => c,
         Err(_) => return,
     };

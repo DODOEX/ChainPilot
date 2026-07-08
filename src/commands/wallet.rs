@@ -140,8 +140,11 @@ async fn build_balance_bvm(args: &BalanceArgs, api: &ApiClients) -> Result<Walle
         .await;
     let value_usd = btc_price.map(|p| total_btc * p);
 
+    // Mirror the EVM `build_balance` asset filter: drop the row when its USD
+    // value is below `--min-usd`. `unwrap_or(0.0)` keeps a priced-N/A row
+    // visible at the default `min_usd == 0.0` rather than dropping it.
     let mut assets = Vec::new();
-    if total_btc > 0.0 {
+    if total_btc > 0.0 && value_usd.unwrap_or(0.0) >= args.min_usd {
         assets.push(WalletAsset {
             chain: "Bitcoin".to_string(),
             chain_id: None,

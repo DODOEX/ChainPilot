@@ -228,9 +228,6 @@ impl ApprovalDeps for LiveApprovalDeps<'_> {
     }
 }
 
-/// If `raw` parses as a non-EVM address, return a swap-specific error
-/// explaining why DODO routing can't quote it. Native token symbols and
-/// `0x` EVM addresses return `None` so they continue through the resolver.
 /// How a `swap quote` request should be routed based on the address shapes of
 /// `--from` / `--to`. DODO's route API is EVM-only; Solana pairs go to Jupiter
 /// (read-only quote); Bitcoin and mixed EVM/SVM pairs are rejected.
@@ -262,11 +259,11 @@ fn classify_quote_route(from: &str, to: &str) -> QuoteRoute {
 }
 
 /// Classify a transaction hash by shape. EVM hashes and Bitcoin txids both
-/// encode 32 bytes as hex, so they're structurally indistinguishable. We
-/// disambiguate by the `0x` prefix: with the prefix it's an EVM hash, and
-/// without it on a 64-char hex string we assume the user meant a Bitcoin
-/// txid — DODO swap history doesn't track BTC tx and the EVM RPC would
-/// only report "Transaction not found", which is misleading.
+/// encode 32 bytes as hex, so a 64-char hex string with no `0x` prefix is
+/// genuinely ambiguous between the two. We only *reject* the shapes that can
+/// never be an EVM hash (base58 Solana signatures); for the ambiguous 64-hex
+/// case we nudge the user toward the `0x` prefix rather than asserting a chain,
+/// since the common cause is an EVM hash pasted without its prefix.
 fn swap_non_evm_tx_hash_error(raw: &str) -> Option<ChainError> {
     let trimmed = raw.trim();
     let stripped = trimmed.strip_prefix("0x");
@@ -277,11 +274,12 @@ fn swap_non_evm_tx_hash_error(raw: &str) -> Option<ChainError> {
         }
     }
 
-    // 64 hex chars without `0x` → almost certainly a BTC txid (or a malformed
-    // EVM hash, but we lean toward the more helpful BVM message).
+    // 64 hex chars without `0x`: ambiguous (EVM hash missing its prefix, or a
+    // BTC txid). Don't assert Bitcoin — point at the missing prefix, which is
+    // the actionable fix for the far more common EVM case.
     if trimmed.len() == 64 && trimmed.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Some(ChainError::Config(
-            "swap status is not supported for Bitcoin mainnet — DODO swap history only tracks EVM transactions (an EVM transaction hash must include the 0x prefix)".to_string(),
+            "swap status expects an EVM transaction hash — prefix it with 0x (Bitcoin txids are not tracked; DODO swap history only covers EVM transactions)".to_string(),
         ));
     }
 
@@ -354,7 +352,7 @@ async fn quote(
     let user_addr = match config.wallet_address.as_deref() {
         Some(addr) => match addr.parse::<Address>() {
             Ok(parsed) => parsed.to_string(),
-            Err(_) => return Err(ChainError::InvalidAddress(addr.to_string()).into()),
+            Err(_) => return Err(ChainError::InvalidAddress(addr.to_string())),
         },
         None => Address::ZERO.to_string(),
     };
@@ -411,12 +409,14 @@ fn raw_to_display(raw: &str, decimals: u8) -> f64 {
 }
 
 async fn build_svm_quote(args: &QuoteArgs, api: &ApiClients) -> Result<Quote> {
-    // Resolve both mints via Jupiter for decimals + symbol. A miss means the
-    // mint isn't in Jupiter's index, so it isn't routable here.
-    let from_meta = api.jupiter.token(&args.from).await?.ok_or_else(|| {
+    // Resolve both mints via Jupiter for decimals + symbol. The two lookups are
+    // independent, so run them concurrently. A miss means the mint isn't in
+    // Jupiter's index, so it isn't routable here.
+    let (from_res, to_res) = tokio::join!(api.jupiter.token(&args.from), api.jupiter.token(&args.to));
+    let from_meta = from_res?.ok_or_else(|| {
         ChainError::Config(format!("Solana mint not found on Jupiter: {}", args.from))
     })?;
-    let to_meta = api.jupiter.token(&args.to).await?.ok_or_else(|| {
+    let to_meta = to_res?.ok_or_else(|| {
         ChainError::Config(format!("Solana mint not found on Jupiter: {}", args.to))
     })?;
 
@@ -579,8 +579,7 @@ async fn fetch_quote_with_fallback<D: QuoteDeps>(
                         have: have_raw,
                         need: amount_raw,
                         token: from_token.symbol.clone(),
-                    }
-                    .into());
+                    });
                 }
             } else {
                 let token_addr = from_token
@@ -594,8 +593,7 @@ async fn fetch_quote_with_fallback<D: QuoteDeps>(
                         have: have_raw,
                         need: amount_raw,
                         token: from_token.symbol.clone(),
-                    }
-                    .into());
+                    });
                 }
 
                 if let Some(chain_cfg) = config.chain_config_for(req.chain_id) {
@@ -613,8 +611,7 @@ async fn fetch_quote_with_fallback<D: QuoteDeps>(
                         return Err(ChainError::NotApproved {
                             token: from_token.address.clone(),
                             spender: chain_cfg.contracts.dodo_approve.to_string(),
-                        }
-                        .into());
+                        });
                     }
                 }
             }
