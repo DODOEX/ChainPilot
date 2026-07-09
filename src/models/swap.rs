@@ -79,6 +79,85 @@ pub struct ApprovalResult {
     pub from_address: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreparedOperation {
+    SwapExecute,
+    Approve,
+    Revoke,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreparedTransaction {
+    pub to: String,
+    pub value: String,
+    pub data: String,
+    pub chain_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gas: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_fee_per_gas: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_priority_fee_per_gas: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreparedQuote {
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub quote_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slippage_bps: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreparedTokenAmount {
+    pub chain_id: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    pub symbol: String,
+    pub decimals: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_raw: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_display: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_usd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_amount_raw: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_amount_display: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreparedRisk {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_in: Option<PreparedTokenAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_out: Option<PreparedTokenAmount>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spender: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub router: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_gas_usd: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreparedChainpilotTransaction {
+    pub source: String,
+    pub operation: PreparedOperation,
+    pub chain_id: u64,
+    pub caip2: String,
+    #[serde(rename = "from")]
+    pub from_address: String,
+    pub transaction: PreparedTransaction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quote: Option<PreparedQuote>,
+    pub risk: PreparedRisk,
+}
+
 impl SwapHistoryRecord {
     pub fn from_execution(
         quote: &crate::models::quote::Quote,

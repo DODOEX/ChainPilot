@@ -162,6 +162,40 @@ impl TableRenderable for crate::models::swap::ApprovalResult {
     }
 }
 
+impl TableRenderable for crate::models::swap::PreparedChainpilotTransaction {
+    fn render_table(&self) {
+        let mut table = Table::new();
+        table.set_header(vec!["Field", "Value"]);
+        table.add_row(vec!["Source", &self.source]);
+        table.add_row(vec!["Operation", &format!("{:?}", self.operation)]);
+        table.add_row(vec!["Chain ID", &self.chain_id.to_string()]);
+        table.add_row(vec!["CAIP-2", &self.caip2]);
+        table.add_row(vec!["From", &self.from_address]);
+        table.add_row(vec!["To", &self.transaction.to]);
+        table.add_row(vec!["Value", &self.transaction.value]);
+        if let Some(ref gas) = self.transaction.gas {
+            table.add_row(vec!["Gas", gas]);
+        }
+        if let Some(ref quote) = self.quote {
+            table.add_row(vec!["Quote ID", &quote.quote_id]);
+            if let Some(expires_at) = quote.expires_at {
+                table.add_row(vec![
+                    "Quote Expires",
+                    &expires_at.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+                ]);
+            }
+        }
+        if let Some(ref router) = self.risk.router {
+            table.add_row(vec!["Router", router]);
+        }
+        if let Some(ref spender) = self.risk.spender {
+            table.add_row(vec!["Spender", spender]);
+        }
+        table.add_row(vec!["Calldata", &self.transaction.data]);
+        println!("{}", table);
+    }
+}
+
 impl TableRenderable for crate::models::token::TokenOwnershipActionResult {
     fn render_table(&self) {
         let mut table = Table::new();

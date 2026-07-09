@@ -252,6 +252,32 @@ chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --skip-estimat
 | `--gas-buffer-pct`  | Add N% buffer on top of `eth_estimateGas` result (e.g. `20` = +20%)     |
 | `--skip-estimate`   | Skip `eth_estimateGas` and use the quote's gas estimate directly         |
 
+**Prepare an unsigned transaction for an external signer:**
+```bash
+# Swap execution payload from a saved quote
+chainpilot --json swap prepare execute --quote-id <QUOTE_ID> --wallet 0xYourAddress
+
+# ERC-20 approval payload
+chainpilot --json swap prepare approve --quote-id <QUOTE_ID> --wallet 0xYourAddress
+chainpilot --json swap prepare approve \
+  --token 0xTokenAddr \
+  --spender 0xSpenderAddr \
+  --amount 100 \
+  --wallet 0xYourAddress
+
+# ERC-20 revoke payload
+chainpilot --json swap prepare revoke \
+  --token 0xTokenAddr \
+  --spender 0xSpenderAddr \
+  --wallet 0xYourAddress
+```
+
+`swap prepare` does not sign or broadcast. In JSON mode it returns a stable
+unsigned transaction payload with `source`, `operation`, `chain_id`, `caip2`,
+`from`, `transaction { to, value, data, chain_id }`, and risk metadata. This is
+intended for external signing systems such as Privy; user confirmation,
+authorization checks, signing, and broadcasting must happen outside ChainPilot.
+
 **Check transaction status:**
 ```bash
 chainpilot swap status --tx-hash 0x...

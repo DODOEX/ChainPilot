@@ -13,6 +13,8 @@ pub enum SwapAction {
     Quote(QuoteArgs),
     /// Simulate a swap from a saved quote
     Simulate(SimulateArgs),
+    /// Prepare an unsigned transaction payload for an external signer
+    Prepare(PrepareCmd),
     /// Execute a swap (requires wallet)
     Execute(ExecuteArgs),
     /// Check swap transaction status
@@ -51,6 +53,71 @@ pub struct SimulateArgs {
     pub quote_id: String,
 
     /// Wallet address for balance/allowance checks
+    #[arg(long, env = "WALLET_ADDRESS")]
+    pub wallet: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PrepareCmd {
+    #[command(subcommand)]
+    pub action: PrepareAction,
+}
+
+#[derive(Subcommand)]
+pub enum PrepareAction {
+    /// Prepare a swap execution transaction from a saved quote
+    Execute(PrepareExecuteArgs),
+    /// Prepare an ERC-20 approval transaction
+    Approve(PrepareApproveArgs),
+    /// Prepare an ERC-20 revoke transaction
+    Revoke(PrepareRevokeArgs),
+}
+
+#[derive(Args)]
+pub struct PrepareExecuteArgs {
+    /// Quote ID returned by `chainpilot swap quote`
+    #[arg(long)]
+    pub quote_id: String,
+
+    /// Wallet address that will sign and send the transaction via an external signer
+    #[arg(long, env = "WALLET_ADDRESS")]
+    pub wallet: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PrepareApproveArgs {
+    /// Quote ID to derive token and spender from (uses from-token and DODOApprove spender)
+    #[arg(long)]
+    pub quote_id: Option<String>,
+
+    /// Token symbol or address to approve (overrides quote's from-token)
+    #[arg(long)]
+    pub token: Option<String>,
+
+    /// Spender contract address (overrides quote's spender)
+    #[arg(long)]
+    pub spender: Option<String>,
+
+    /// Amount to approve in human-readable units (omit for unlimited / U256::MAX)
+    #[arg(long)]
+    pub amount: Option<String>,
+
+    /// Wallet address that will sign and send the transaction via an external signer
+    #[arg(long, env = "WALLET_ADDRESS")]
+    pub wallet: Option<String>,
+}
+
+#[derive(Args)]
+pub struct PrepareRevokeArgs {
+    /// Token contract address
+    #[arg(long)]
+    pub token: String,
+
+    /// Spender contract address
+    #[arg(long)]
+    pub spender: String,
+
+    /// Wallet address that will sign and send the transaction via an external signer
     #[arg(long, env = "WALLET_ADDRESS")]
     pub wallet: Option<String>,
 }
