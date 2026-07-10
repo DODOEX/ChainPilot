@@ -182,7 +182,9 @@ mod tests {
     use super::*;
     use crate::config::AppConfig;
     use crate::models::quote::{Quote, TokenRef};
-    use crate::models::swap::{ExecutionResult, ExecutionStatus, SwapHistoryRecord};
+    use crate::models::swap::{
+        ChainPilotRisk, ExecutionResult, ExecutionStatus, SwapHistoryRecord,
+    };
     use crate::models::token::TokenInfo;
 
     /// Build a QuoteStore backed by a unique temp directory.
@@ -386,6 +388,14 @@ mod tests {
             from_address: Some("0xWallet".to_string()),
             gas_used: Some(120_000),
             effective_gas_price_gwei: Some(20.0),
+            source: None,
+            operation: None,
+            chain_id: None,
+            caip2: None,
+            r#from: None,
+            transaction: None,
+            quote: None,
+            risk: ChainPilotRisk::default(),
         };
         let rec = SwapHistoryRecord::from_execution(&q, &execution, "hist-1".to_string());
 
@@ -416,6 +426,14 @@ mod tests {
                 from_address: None,
                 gas_used: None,
                 effective_gas_price_gwei: None,
+                source: None,
+                operation: None,
+                chain_id: None,
+                caip2: None,
+                r#from: None,
+                transaction: None,
+                quote: None,
+                risk: ChainPilotRisk::default(),
             };
             let rec = SwapHistoryRecord::from_execution(&q, &execution, Uuid::new_v4().to_string());
             store.save_history(&rec).unwrap();

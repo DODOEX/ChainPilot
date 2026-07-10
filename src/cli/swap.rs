@@ -13,15 +13,15 @@ pub enum SwapAction {
     Quote(QuoteArgs),
     /// Simulate a swap from a saved quote
     Simulate(SimulateArgs),
-    /// Execute a swap (requires wallet)
+    /// Execute a saved swap quote; --dry-run emits an unsigned transaction payload
     Execute(ExecuteArgs),
     /// Check swap transaction status
     Status(StatusArgs),
     /// Show swap history
     History(HistoryArgs),
-    /// Approve token spending
+    /// Approve token spending; --dry-run emits an unsigned ERC-20 approve payload
     Approve(ApproveArgs),
-    /// Revoke token spending approval
+    /// Revoke token spending approval; --dry-run emits an unsigned ERC-20 revoke payload
     Revoke(RevokeArgs),
 }
 
@@ -61,19 +61,19 @@ pub struct ExecuteArgs {
     #[arg(long)]
     pub quote_id: String,
 
-    /// Simulate execution without broadcasting the transaction
+    /// Dry-run: build an unsigned external-signer transaction payload without signing or broadcasting
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Gas limit override
+    /// Gas limit override; included in dry-run payloads when set
     #[arg(long)]
     pub gas_limit: Option<u64>,
 
-    /// Max fee per gas in gwei
+    /// Max fee per gas in gwei; included in dry-run payloads as wei hex when set
     #[arg(long)]
     pub max_fee_gwei: Option<f64>,
 
-    /// Wallet address for dry-run simulation (no private key needed; env: WALLET_ADDRESS)
+    /// Wallet address used as the unsigned transaction sender for dry-run payloads (no private key needed; env: WALLET_ADDRESS)
     #[arg(long, env = "WALLET_ADDRESS")]
     pub wallet: Option<String>,
 
@@ -81,11 +81,11 @@ pub struct ExecuteArgs {
     #[arg(long)]
     pub wait: bool,
 
-    /// Skip eth_estimateGas pre-flight check and use the quote's gas estimate instead
+    /// Live execution only: skip eth_estimateGas pre-flight and use the quote's gas estimate instead
     #[arg(long)]
     pub skip_estimate: bool,
 
-    /// Add a percentage buffer on top of eth_estimateGas result (e.g. 20 for +20%)
+    /// Live execution only: add a percentage buffer on top of eth_estimateGas result (e.g. 20 for +20%)
     #[arg(long)]
     pub gas_buffer_pct: Option<u64>,
 }
@@ -110,7 +110,7 @@ pub struct HistoryArgs {
 
 #[derive(Args)]
 pub struct ApproveArgs {
-    /// Quote ID to derive token and spender from (uses from-token and router address)
+    /// Quote ID to derive token and spender from (uses from-token and DODOApprove contract)
     #[arg(long)]
     pub quote_id: Option<String>,
 
@@ -118,7 +118,7 @@ pub struct ApproveArgs {
     #[arg(long)]
     pub token: Option<String>,
 
-    /// Spender contract address (overrides quote's router address)
+    /// Spender contract address (overrides quote-derived DODOApprove contract)
     #[arg(long)]
     pub spender: Option<String>,
 
@@ -126,19 +126,22 @@ pub struct ApproveArgs {
     #[arg(long)]
     pub amount: Option<String>,
 
-    /// Dry-run mode: show what would be approved without sending
+    /// Dry-run: build an unsigned ERC-20 approve transaction payload without signing or sending
     #[arg(long)]
     pub dry_run: bool,
 }
 
 #[derive(Args)]
 pub struct RevokeArgs {
+    /// Token contract address whose allowance should be revoked
     #[arg(long)]
     pub token: String,
 
+    /// Spender contract address whose allowance should be revoked
     #[arg(long)]
     pub spender: String,
 
+    /// Dry-run: build an unsigned ERC-20 revoke transaction payload without signing or sending
     #[arg(long)]
     pub dry_run: bool,
 }

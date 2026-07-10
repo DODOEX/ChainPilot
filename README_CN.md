@@ -72,7 +72,7 @@ DODO_PROJECT_ID=your-id
 | `KEYSTORE_PASSWORD_FILE` | `--password-file`   | —                            | 从文件读取 keystore 密码           |
 | `KEYSTORE_PASSWORD_ENV` | `--password-env`     | —                            | 从指定环境变量读取 keystore 密码   |
 | `KEYSTORE_PASSWORD`    | —                     | —                            | keystore 密码的默认环境变量        |
-| `WALLET_ADDRESS`       | `--wallet-address`    | —                            | 余额查询 / 模拟时使用的钱包地址    |
+| `WALLET_ADDRESS`       | `--wallet-address`    | —                            | 余额查询 / 模拟 / dry-run sender fallback 钱包地址 |
 | `--rpc-url`            | 仅 CLI                | 链内置公共 RPC               | 显式覆盖 JSON-RPC 端点             |
 | `CHAIN_ID`             | `--chain-id`          | `1`（以太坊主网）            | 当前链 ID                          |
 | `DODO_API_KEY`         | —                     | 编译时内嵌默认值             | DODO 路由 API Key                  |
@@ -212,7 +212,7 @@ chainpilot swap simulate --quote-id <QUOTE_ID> --wallet 0xYourAddress
 
 **执行兑换：**
 ```bash
-# 演习模式：构建并模拟交易，不广播
+# 演习模式：构建未签名的外部 signer payload，不广播
 chainpilot swap execute --quote-id <QUOTE_ID> --dry-run --wallet 0xYourAddress
 
 # 用裸私钥正式执行
@@ -237,12 +237,55 @@ chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --skip-estimat
 
 | 执行标志            | 说明                                                              |
 |---------------------|-------------------------------------------------------------------|
-| `--dry-run`         | 构建并模拟交易，不广播；使用 `--wallet` 代替私钥                 |
+| `--dry-run`         | 构建未签名的外部 signer payload，不签名也不广播；使用 `--wallet` 代替私钥 |
 | `--wait`            | 阻塞直到交易上链，显示最终链上状态                               |
-| `--gas-limit`       | 硬覆盖 Gas 上限                                                   |
-| `--max-fee-gwei`    | 覆盖 EIP-1559 最大 Gas 费用（gwei）                              |
-| `--gas-buffer-pct`  | 在 `eth_estimateGas` 结果上添加 N% 缓冲（如 `20` = +20%）       |
-| `--skip-estimate`   | 跳过 `eth_estimateGas`，直接使用报价中的 Gas 估算                |
+| `--gas-limit`       | 硬覆盖 Gas 上限；设置后会写入 dry-run payload                    |
+| `--max-fee-gwei`    | 覆盖 EIP-1559 最大 Gas 费用（gwei）；设置后会以 wei hex 写入 dry-run payload |
+| `--gas-buffer-pct`  | 仅 live execution 生效：在 `eth_estimateGas` 结果上添加 N% 缓冲（如 `20` = +20%） |
+| `--skip-estimate`   | 仅 live execution 生效：跳过 `eth_estimateGas`，直接使用报价中的 Gas 估算 |
+
+**外部 signer dry-run contract：**
+```bash
+# 从已保存报价生成兑换执行 payload
+chainpilot --json swap execute --quote-id <QUOTE_ID> --dry-run --wallet 0xYourAddress
+
+# 从已保存报价生成 ERC-20 授权 payload
+chainpilot --json swap approve --quote-id <QUOTE_ID> --dry-run --wallet-address 0xYourAddress
+
+# 显式指定 ERC-20 授权 payload
+chainpilot --json swap approve \
+  --token USDC \
+  --spender 0xSpenderAddr \
+  --amount 100 \
+  --dry-run \
+  --wallet-address 0xYourAddress
+
+# ERC-20 revoke payload
+chainpilot --json swap revoke \
+  --token 0xTokenAddr \
+  --spender 0xSpenderAddr \
+  --dry-run \
+  --wallet-address 0xYourAddress
+```
+
+JSON 模式下，swap / approve / revoke 的 dry-run 不会签名或广播交易。
+响应会保留原有预览字段，并额外包含稳定的外部 signer payload：
+`source`、`operation`、`chain_id`、`caip2`、`from`、
+`transaction { to, value, data, chain_id }`、可选 `quote` 和 `risk` metadata。
+`operation` 取值为 `swap_execute`、`approve` 或 `revoke`。兑换执行优先使用
+`--wallet` 传入 dry-run 钱包；如果省略，会 fallback 到全局
+`--wallet-address/WALLET_ADDRESS` sender context。approve / revoke 使用全局
+`--wallet-address`。approve / revoke dry-run 会在 `transaction.data` 中返回
+ERC-20 `approve(address,uint256)` calldata。Privy 等外部 signer 系统仍需要在
+提交前自行执行授权、确认、预算和风险校验。
+所有外部 signer dry-run 都必须能解析出 sender wallet；无法解析时会失败，
+而不是省略 `data.from` 或 `data.transaction`。execute dry-run 会从 signer
+配置、`--wallet` 或全局 `--wallet-address/WALLET_ADDRESS` 解析 sender；
+approve / revoke dry-run 会从 signer 配置或全局
+`--wallet-address/WALLET_ADDRESS` 解析 sender。`--gas-limit` 和
+`--max-fee-gwei` 会反映到未签名 swap 交易 payload 中；dry-run 不调用
+`eth_estimateGas`，因此 `--gas-buffer-pct` 和 `--skip-estimate` 只影响 live
+execution。
 
 **查询交易状态：**
 ```bash
@@ -273,7 +316,7 @@ chainpilot swap approve --token USDC --spender 0x... --amount 1000 --private-key
 chainpilot swap approve --token USDC --spender 0x... --private-key 0x...
 
 # 演习模式，预览但不发送
-chainpilot swap approve --quote-id <QUOTE_ID> --dry-run
+chainpilot --json swap approve --quote-id <QUOTE_ID> --dry-run --wallet-address 0xYourAddress
 ```
 
 **撤销授权：**
@@ -284,7 +327,7 @@ chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --private-key
 chainpilot --keystore-path ~/.chainpilot/main.json swap revoke --token 0xTokenAddr --spender 0xSpenderAddr
 
 # 演习模式
-chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --dry-run
+chainpilot --json swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --dry-run --wallet-address 0xYourAddress
 ```
 
 ### Token（代币）

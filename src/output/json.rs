@@ -70,11 +70,16 @@ fn error_code_and_suggestion(err: &ChainError) -> (String, Option<String>) {
                     .to_string(),
             ),
         ),
-        ChainError::NoWallet => (
+        ChainError::NoWallet | ChainError::NoDryRunWallet => (
             "no_wallet".to_string(),
             Some(
-                "Set PRIVATE_KEY or KEYSTORE_PATH, or use --private-key / --keystore-path."
-                    .to_string(),
+                match err {
+                    ChainError::NoDryRunWallet => {
+                        "Use --wallet, --wallet-address/WALLET_ADDRESS, or configure PRIVATE_KEY/KEYSTORE_PATH."
+                    }
+                    _ => "Set PRIVATE_KEY or KEYSTORE_PATH, or use --private-key / --keystore-path.",
+                }
+                .to_string(),
             ),
         ),
         ChainError::InvalidAmount(_) => (
@@ -139,6 +144,11 @@ mod tests {
                 ChainError::InvalidAmount("bad".to_string()),
                 "invalid_amount",
                 Some("plain decimal"),
+            ),
+            (
+                ChainError::NoDryRunWallet,
+                "no_wallet",
+                Some("--wallet-address"),
             ),
             (
                 ChainError::InsufficientBalance {

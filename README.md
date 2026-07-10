@@ -78,7 +78,7 @@ Supported environment variables are intentionally limited. Runtime config is rea
 | `KEYSTORE_PASSWORD_FILE` | `--password-file`   | —                              | Read keystore password from file               |
 | `KEYSTORE_PASSWORD_ENV` | `--password-env`     | —                              | Read keystore password from named env var      |
 | `KEYSTORE_PASSWORD`    | —                     | —                              | Default env var used for keystore password     |
-| `WALLET_ADDRESS`       | `--wallet-address`    | —                              | Wallet address for balance/simulate context    |
+| `WALLET_ADDRESS`       | `--wallet-address`    | —                              | Wallet address for balance/simulate and dry-run sender fallback |
 | `--rpc-url`            | CLI only              | Chain's built-in public RPC    | Explicit JSON-RPC override                     |
 | `CHAIN_ID`             | `--chain-id`          | `1` (Ethereum mainnet)         | Active chain ID                                |
 | `DODO_API_KEY`         | —                     | Compiled-in default            | DODO routing API key                           |
@@ -220,7 +220,7 @@ Simulation is read-only — it costs no gas and does not broadcast any transacti
 
 **Execute a swap:**
 ```bash
-# Dry-run: build and simulate the transaction without broadcasting
+# Dry-run: build an unsigned external-signer payload without broadcasting
 chainpilot swap execute --quote-id <QUOTE_ID> --dry-run --wallet 0xYourAddress
 
 # Live execution with a raw private key
@@ -245,12 +245,57 @@ chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --skip-estimat
 
 | Execute flag        | Description                                                              |
 |---------------------|--------------------------------------------------------------------------|
-| `--dry-run`         | Build and simulate the tx without broadcasting; `--wallet` instead of key |
+| `--dry-run`         | Build an unsigned external-signer payload without signing or broadcasting; `--wallet` instead of key |
 | `--wait`            | Block until the tx is mined and show final on-chain status               |
-| `--gas-limit`       | Hard override for gas limit                                              |
-| `--max-fee-gwei`    | Override max fee per gas (EIP-1559), in gwei                             |
-| `--gas-buffer-pct`  | Add N% buffer on top of `eth_estimateGas` result (e.g. `20` = +20%)     |
-| `--skip-estimate`   | Skip `eth_estimateGas` and use the quote's gas estimate directly         |
+| `--gas-limit`       | Hard override for gas limit; included in dry-run payloads when set       |
+| `--max-fee-gwei`    | Override max fee per gas (EIP-1559), in gwei; included in dry-run payloads as wei hex when set |
+| `--gas-buffer-pct`  | Live execution only: add N% buffer on top of `eth_estimateGas` result (e.g. `20` = +20%) |
+| `--skip-estimate`   | Live execution only: skip `eth_estimateGas` and use the quote's gas estimate directly |
+
+**External signer dry-run contract:**
+```bash
+# Swap execution payload from a saved quote
+chainpilot --json swap execute --quote-id <QUOTE_ID> --dry-run --wallet 0xYourAddress
+
+# ERC-20 approval payload from a saved quote
+chainpilot --json swap approve --quote-id <QUOTE_ID> --dry-run --wallet-address 0xYourAddress
+
+# Explicit ERC-20 approval payload
+chainpilot --json swap approve \
+  --token USDC \
+  --spender 0xSpenderAddr \
+  --amount 100 \
+  --dry-run \
+  --wallet-address 0xYourAddress
+
+# ERC-20 revoke payload
+chainpilot --json swap revoke \
+  --token 0xTokenAddr \
+  --spender 0xSpenderAddr \
+  --dry-run \
+  --wallet-address 0xYourAddress
+```
+
+In JSON mode, dry-run swap/approve/revoke responses do not sign or broadcast.
+They include the legacy preview fields plus a stable external-signer payload:
+`source`, `operation`, `chain_id`, `caip2`, `from`,
+`transaction { to, value, data, chain_id }`, optional `quote`, and `risk`
+metadata. `operation` is one of `swap_execute`, `approve`, or `revoke`.
+For swaps, pass the dry-run wallet with `--wallet`; if omitted, execute dry-run
+falls back to the global `--wallet-address` / `WALLET_ADDRESS` sender context.
+For approve/revoke, pass the sender with the global `--wallet-address`.
+Approve and revoke dry-runs include ERC-20 `approve(address,uint256)` calldata
+in `transaction.data`. Systems such as
+Privy should still apply their own authorization, confirmation, budget, and risk
+checks before submitting the transaction.
+All external-signer dry-runs require a sender wallet and fail instead of
+omitting `data.from` or `data.transaction` when no sender can be resolved.
+Execute dry-run resolves the sender from signer config, `--wallet`, or global
+`--wallet-address` / `WALLET_ADDRESS`; approve/revoke dry-runs resolve it from
+signer config or global `--wallet-address` / `WALLET_ADDRESS`.
+`--gas-limit` and `--max-fee-gwei` are reflected in the unsigned swap
+transaction payload; dry-run does not call `eth_estimateGas`, so
+`--gas-buffer-pct` and `--skip-estimate` only affect live execution.
 
 **Check transaction status:**
 ```bash
@@ -281,7 +326,7 @@ chainpilot swap approve --token USDC --spender 0x... --amount 1000 --private-key
 chainpilot swap approve --token USDC --spender 0x... --private-key 0x...
 
 # Dry-run to preview without sending
-chainpilot swap approve --quote-id <QUOTE_ID> --dry-run
+chainpilot --json swap approve --quote-id <QUOTE_ID> --dry-run --wallet-address 0xYourAddress
 ```
 
 **Revoke an approval:**
@@ -292,7 +337,7 @@ chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --private-key
 chainpilot --keystore-path ~/.chainpilot/main.json swap revoke --token 0xTokenAddr --spender 0xSpenderAddr
 
 # Dry-run
-chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --dry-run
+chainpilot --json swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --dry-run --wallet-address 0xYourAddress
 ```
 
 ### Token
