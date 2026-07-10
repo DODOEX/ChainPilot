@@ -212,7 +212,7 @@ chainpilot swap simulate --quote-id <QUOTE_ID> --wallet 0xYourAddress
 
 **执行兑换：**
 ```bash
-# 演习模式：构建并模拟交易，不广播
+# 演习模式：构建未签名的外部 signer payload，不广播
 chainpilot swap execute --quote-id <QUOTE_ID> --dry-run --wallet 0xYourAddress
 
 # 用裸私钥正式执行
@@ -237,12 +237,12 @@ chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --skip-estimat
 
 | 执行标志            | 说明                                                              |
 |---------------------|-------------------------------------------------------------------|
-| `--dry-run`         | 构建并模拟交易，不广播；使用 `--wallet` 代替私钥                 |
+| `--dry-run`         | 构建未签名的外部 signer payload，不签名也不广播；使用 `--wallet` 代替私钥 |
 | `--wait`            | 阻塞直到交易上链，显示最终链上状态                               |
-| `--gas-limit`       | 硬覆盖 Gas 上限                                                   |
-| `--max-fee-gwei`    | 覆盖 EIP-1559 最大 Gas 费用（gwei）                              |
-| `--gas-buffer-pct`  | 在 `eth_estimateGas` 结果上添加 N% 缓冲（如 `20` = +20%）       |
-| `--skip-estimate`   | 跳过 `eth_estimateGas`，直接使用报价中的 Gas 估算                |
+| `--gas-limit`       | 硬覆盖 Gas 上限；设置后会写入 dry-run payload                    |
+| `--max-fee-gwei`    | 覆盖 EIP-1559 最大 Gas 费用（gwei）；设置后会以 wei hex 写入 dry-run payload |
+| `--gas-buffer-pct`  | 仅 live execution 生效：在 `eth_estimateGas` 结果上添加 N% 缓冲（如 `20` = +20%） |
+| `--skip-estimate`   | 仅 live execution 生效：跳过 `eth_estimateGas`，直接使用报价中的 Gas 估算 |
 
 **外部 signer dry-run contract：**
 ```bash
@@ -277,6 +277,10 @@ JSON 模式下，swap / approve / revoke 的 dry-run 不会签名或广播交易
 approve / revoke dry-run 会在 `transaction.data` 中返回 ERC-20
 `approve(address,uint256)` calldata。Privy 等外部 signer 系统仍需要在提交前
 自行执行授权、确认、预算和风险校验。
+swap dry-run 必须能解析出 sender wallet；如果缺少 signer、`--wallet` 和全局
+`--wallet-address/WALLET_ADDRESS`，命令会失败，而不是省略 `data.transaction`。
+`--gas-limit` 和 `--max-fee-gwei` 会反映到未签名交易 payload 中；dry-run 不调用
+`eth_estimateGas`，因此 `--gas-buffer-pct` 和 `--skip-estimate` 只影响 live execution。
 
 **查询交易状态：**
 ```bash

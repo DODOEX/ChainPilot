@@ -19,6 +19,9 @@ pub enum ChainError {
     #[error("No wallet configured. Set PRIVATE_KEY/KEYSTORE_PATH env vars or use --private-key/--keystore-path")]
     NoWallet,
 
+    #[error("No dry-run wallet configured. Use --wallet, --wallet-address/WALLET_ADDRESS, or configure PRIVATE_KEY/KEYSTORE_PATH to derive the sender")]
+    NoDryRunWallet,
+
     #[error("Invalid private key: {0}")]
     InvalidPrivateKey(String),
 
@@ -97,6 +100,15 @@ mod tests {
         assert!(e.to_string().contains("--private-key"));
         assert!(e.to_string().contains("KEYSTORE_PATH"));
         assert!(e.to_string().contains("--keystore-path"));
+    }
+
+    #[test]
+    fn no_dry_run_wallet_error_message() {
+        let e = ChainError::NoDryRunWallet;
+        assert!(e.to_string().contains("--wallet"));
+        assert!(e.to_string().contains("--wallet-address"));
+        assert!(e.to_string().contains("WALLET_ADDRESS"));
+        assert!(e.to_string().contains("PRIVATE_KEY"));
     }
 
     #[test]

@@ -220,7 +220,7 @@ Simulation is read-only — it costs no gas and does not broadcast any transacti
 
 **Execute a swap:**
 ```bash
-# Dry-run: build and simulate the transaction without broadcasting
+# Dry-run: build an unsigned external-signer payload without broadcasting
 chainpilot swap execute --quote-id <QUOTE_ID> --dry-run --wallet 0xYourAddress
 
 # Live execution with a raw private key
@@ -245,12 +245,12 @@ chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --skip-estimat
 
 | Execute flag        | Description                                                              |
 |---------------------|--------------------------------------------------------------------------|
-| `--dry-run`         | Build and simulate the tx without broadcasting; `--wallet` instead of key |
+| `--dry-run`         | Build an unsigned external-signer payload without signing or broadcasting; `--wallet` instead of key |
 | `--wait`            | Block until the tx is mined and show final on-chain status               |
-| `--gas-limit`       | Hard override for gas limit                                              |
-| `--max-fee-gwei`    | Override max fee per gas (EIP-1559), in gwei                             |
-| `--gas-buffer-pct`  | Add N% buffer on top of `eth_estimateGas` result (e.g. `20` = +20%)     |
-| `--skip-estimate`   | Skip `eth_estimateGas` and use the quote's gas estimate directly         |
+| `--gas-limit`       | Hard override for gas limit; included in dry-run payloads when set       |
+| `--max-fee-gwei`    | Override max fee per gas (EIP-1559), in gwei; included in dry-run payloads as wei hex when set |
+| `--gas-buffer-pct`  | Live execution only: add N% buffer on top of `eth_estimateGas` result (e.g. `20` = +20%) |
+| `--skip-estimate`   | Live execution only: skip `eth_estimateGas` and use the quote's gas estimate directly |
 
 **External signer dry-run contract:**
 ```bash
@@ -286,6 +286,11 @@ with the global `--wallet-address`. Approve and revoke dry-runs include ERC-20
 `approve(address,uint256)` calldata in `transaction.data`. Systems such as
 Privy should still apply their own authorization, confirmation, budget, and risk
 checks before submitting the transaction.
+Swap dry-runs require a sender wallet and fail instead of omitting
+`data.transaction` when no sender can be resolved. `--gas-limit` and
+`--max-fee-gwei` are reflected in the unsigned transaction payload; dry-run does
+not call `eth_estimateGas`, so `--gas-buffer-pct` and `--skip-estimate` only
+affect live execution.
 
 **Check transaction status:**
 ```bash

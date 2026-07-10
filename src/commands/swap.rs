@@ -878,6 +878,18 @@ fn optional_u64_to_hex(value: Option<u64>) -> Option<String> {
     value.map(|v| format!("0x{v:x}"))
 }
 
+fn optional_gwei_to_wei_hex(value: Option<f64>) -> Result<Option<String>> {
+    let Some(gwei) = value else {
+        return Ok(None);
+    };
+    if !gwei.is_finite() || gwei < 0.0 {
+        return Err(ChainError::InvalidAmount(
+            "max fee gwei must be a non-negative finite number".to_string(),
+        ));
+    }
+    Ok(Some(format!("0x{:x}", (gwei * 1e9) as u128)))
+}
+
 fn decimal_or_hex_to_hex(value: &str) -> Result<String> {
     if value.is_empty() {
         return Ok("0x0".to_string());
@@ -953,6 +965,8 @@ fn quote_token_in_amount_usd(quote: &Quote) -> Option<String> {
 fn build_dry_run_execute_payload(
     quote: &Quote,
     from_address: &str,
+    gas_limit: Option<u64>,
+    max_fee_gwei: Option<f64>,
 ) -> Result<(
     String,
     ChainPilotTransaction,
@@ -976,8 +990,8 @@ fn build_dry_run_execute_payload(
             value: decimal_or_hex_to_hex(&quote.value)?,
             data: quote.calldata.clone(),
             chain_id: quote.chain_id,
-            gas: optional_u64_to_hex(quote.estimated_gas.or(quote.gas_limit)),
-            max_fee_per_gas: None,
+            gas: optional_u64_to_hex(gas_limit.or(quote.estimated_gas).or(quote.gas_limit)),
+            max_fee_per_gas: optional_gwei_to_wei_hex(max_fee_gwei)?,
             max_priority_fee_per_gas: None,
         },
         ChainPilotQuote {
@@ -1275,8 +1289,9 @@ async fn execute_quote_with_deps<D: ExecuteDeps>(
                 .map(|signer| signer.address().to_string()),
             args.wallet.clone(),
             config.wallet_address.clone(),
-        );
-        (addr, None, ExecutionStatus::DryRun, None, None)
+        )
+        .ok_or(ChainError::NoDryRunWallet)?;
+        (Some(addr), None, ExecutionStatus::DryRun, None, None)
     } else {
         let signer = crate::chain::resolve_signer(config)?;
         let to_addr: Address = quote_data
@@ -1388,7 +1403,12 @@ async fn execute_quote_with_deps<D: ExecuteDeps>(
     .and_then(|mut result| {
         if args.dry_run {
             if let Some(from) = from_address.as_deref() {
-                let (from, tx, quote, risk) = build_dry_run_execute_payload(quote_data, from)?;
+                let (from, tx, quote, risk) = build_dry_run_execute_payload(
+                    quote_data,
+                    from,
+                    args.gas_limit,
+                    args.max_fee_gwei,
+                )?;
                 result.source = Some("chainpilot".to_string());
                 result.operation = Some(ChainPilotOperation::SwapExecute);
                 result.chain_id = Some(quote_data.chain_id);
@@ -2320,6 +2340,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_quote_dry_run_requires_wallet_for_unsigned_payload() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.dry_run = true;
+
+        let err = execute_quote_with_deps(&deps, &args, &test_config(1), &sample_quote(1))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ChainError::NoDryRunWallet));
+    }
+
+    #[tokio::test]
     async fn execute_quote_dry_run_builds_chainpilot_unsigned_transaction_contract() {
         let deps = MockExecuteDeps {
             estimated_gas: Ok(21_000),
@@ -2365,6 +2403,29 @@ mod tests {
             result.risk.token_in.as_ref().unwrap().amount_usd.as_deref(),
             Some("3000")
         );
+    }
+
+    #[tokio::test]
+    async fn execute_quote_dry_run_applies_transaction_overrides_to_unsigned_payload() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.dry_run = true;
+        args.wallet = Some("0x2222222222222222222222222222222222222222".to_string());
+        args.gas_limit = Some(250_000);
+        args.max_fee_gwei = Some(25.0);
+
+        let result = execute_quote_with_deps(&deps, &args, &test_config(8453), &sample_quote(8453))
+            .await
+            .unwrap();
+
+        let tx = result.transaction.as_ref().unwrap();
+        assert_eq!(tx.gas.as_deref(), Some("0x3d090"));
+        assert_eq!(tx.max_fee_per_gas.as_deref(), Some("0x5d21dba00"));
     }
 
     #[tokio::test]

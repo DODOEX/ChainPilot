@@ -65,11 +65,11 @@ pub struct ExecuteArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Gas limit override
+    /// Gas limit override; included in dry-run payloads when set
     #[arg(long)]
     pub gas_limit: Option<u64>,
 
-    /// Max fee per gas in gwei
+    /// Max fee per gas in gwei; included in dry-run payloads as wei hex when set
     #[arg(long)]
     pub max_fee_gwei: Option<f64>,
 
@@ -81,11 +81,11 @@ pub struct ExecuteArgs {
     #[arg(long)]
     pub wait: bool,
 
-    /// Skip eth_estimateGas pre-flight check and use the quote's gas estimate instead
+    /// Live execution only: skip eth_estimateGas pre-flight and use the quote's gas estimate instead
     #[arg(long)]
     pub skip_estimate: bool,
 
-    /// Add a percentage buffer on top of eth_estimateGas result (e.g. 20 for +20%)
+    /// Live execution only: add a percentage buffer on top of eth_estimateGas result (e.g. 20 for +20%)
     #[arg(long)]
     pub gas_buffer_pct: Option<u64>,
 }
