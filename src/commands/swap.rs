@@ -1371,6 +1371,15 @@ fn build_prepared_approval_payload(
     let _from_addr: Address = from_address
         .parse()
         .map_err(|_| ChainError::InvalidAddress(from_address.to_string()))?;
+    if token
+        .address
+        .eq_ignore_ascii_case(crate::config::chains::NATIVE_ADDR)
+    {
+        return Err(ChainError::Config(format!(
+            "native token {} does not require ERC-20 approval",
+            token.symbol
+        )));
+    }
     let token_addr = token.address.clone();
     let calldata = match operation {
         PreparedOperation::Approve => approve_calldata(spender_addr, amount_u256),
@@ -2741,6 +2750,28 @@ mod tests {
             Some("0")
         );
         assert!(revoke.transaction.data.ends_with(&"0".repeat(64)));
+    }
+
+    #[test]
+    fn prepare_approval_rejects_native_token_payload() {
+        let spender: Address = "0x3333333333333333333333333333333333333333"
+            .parse()
+            .unwrap();
+        let from = "0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A";
+
+        let err = build_prepared_approval_payload(
+            PreparedOperation::Approve,
+            8453,
+            from,
+            native_token(8453),
+            spender,
+            alloy::primitives::U256::MAX,
+            "unlimited".to_string(),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, ChainError::Config(msg) if msg.contains("native token")));
     }
 
     #[test]

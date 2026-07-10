@@ -260,7 +260,7 @@ chainpilot --json swap prepare execute --quote-id <QUOTE_ID> --wallet 0xYourAddr
 # ERC-20 approval payload
 chainpilot --json swap prepare approve --quote-id <QUOTE_ID> --wallet 0xYourAddress
 chainpilot --json swap prepare approve \
-  --token 0xTokenAddr \
+  --token USDC \
   --spender 0xSpenderAddr \
   --amount 100 \
   --wallet 0xYourAddress
@@ -277,6 +277,16 @@ unsigned transaction payload with `source`, `operation`, `chain_id`, `caip2`,
 `from`, `transaction { to, value, data, chain_id }`, and risk metadata. This is
 intended for external signing systems such as Privy; user confirmation,
 authorization checks, signing, and broadcasting must happen outside ChainPilot.
+Use `swap simulate` to inspect route execution, gas, and warnings before this
+step; use `swap prepare` only when an external signer needs the exact unsigned
+transaction object.
+
+`swap prepare approve --quote-id` only applies when the quote spends an ERC-20
+input token. Native input tokens such as ETH, MATIC, BNB, or the chain native
+asset do not require ERC-20 approval and are rejected. For explicit approvals,
+`--token` accepts either a token address or a resolvable symbol from the
+tokenlist/cache/custom token store; use the token address when the symbol is
+ambiguous or unavailable.
 
 **Check transaction status:**
 ```bash
