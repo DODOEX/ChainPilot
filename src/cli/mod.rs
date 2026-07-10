@@ -40,7 +40,7 @@ pub struct Cli {
     #[arg(long, env = "KEYSTORE_PASSWORD_ENV", global = true)]
     pub password_env: Option<String>,
 
-    /// Wallet address to use for quote/simulate context (overrides WALLET_ADDRESS env var)
+    /// Wallet address for quote/simulate context and approve/revoke dry-run sender (overrides WALLET_ADDRESS env var)
     #[arg(long, env = "WALLET_ADDRESS", global = true)]
     pub wallet_address: Option<String>,
 

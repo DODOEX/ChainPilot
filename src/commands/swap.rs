@@ -846,9 +846,9 @@ fn dry_run_from_address(
     subcommand_wallet: Option<String>,
     global_wallet: Option<String>,
 ) -> Option<String> {
-    derived_from_private_key
-        .or(subcommand_wallet)
+    subcommand_wallet
         .or(global_wallet)
+        .or(derived_from_private_key)
 }
 
 fn require_dry_run_from_address(
@@ -2241,13 +2241,19 @@ mod tests {
     }
 
     #[test]
-    fn dry_run_from_address_prefers_private_key_then_subcommand_then_global_wallet() {
+    fn dry_run_from_address_prefers_explicit_wallets_then_private_key() {
         for (derived, subcommand, global, expected) in [
             (
                 Some("0xpk".to_string()),
                 Some("0xsub".to_string()),
                 Some("0xglobal".to_string()),
+                Some("0xsub".to_string()),
+            ),
+            (
                 Some("0xpk".to_string()),
+                None,
+                Some("0xglobal".to_string()),
+                Some("0xglobal".to_string()),
             ),
             (
                 None,
@@ -2446,6 +2452,35 @@ mod tests {
         assert_eq!(
             result.risk.token_in.as_ref().unwrap().amount_usd.as_deref(),
             Some("3000")
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_quote_dry_run_wallet_overrides_configured_signer() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.dry_run = true;
+        args.wallet = Some("0x2222222222222222222222222222222222222222".to_string());
+        let mut config = test_config(8453);
+        config.private_key =
+            Some("0x59c6995e998f97a5a0044966f0945382dbf7f50a3f2f72f5f7a0b7d7d4f5e5f1".to_string());
+
+        let result = execute_quote_with_deps(&deps, &args, &config, &sample_quote(8453))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.r#from.as_deref(),
+            Some("0x2222222222222222222222222222222222222222")
+        );
+        assert_eq!(
+            result.from_address.as_deref(),
+            Some("0x2222222222222222222222222222222222222222")
         );
     }
 
