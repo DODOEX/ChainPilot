@@ -72,7 +72,7 @@ DODO_PROJECT_ID=your-id
 | `KEYSTORE_PASSWORD_FILE` | `--password-file`   | —                            | 从文件读取 keystore 密码           |
 | `KEYSTORE_PASSWORD_ENV` | `--password-env`     | —                            | 从指定环境变量读取 keystore 密码   |
 | `KEYSTORE_PASSWORD`    | —                     | —                            | keystore 密码的默认环境变量        |
-| `WALLET_ADDRESS`       | `--wallet-address`    | —                            | 余额查询 / 模拟时使用的钱包地址    |
+| `WALLET_ADDRESS`       | `--wallet-address`    | —                            | 余额查询 / 模拟 / dry-run sender fallback 钱包地址 |
 | `--rpc-url`            | 仅 CLI                | 链内置公共 RPC               | 显式覆盖 JSON-RPC 端点             |
 | `CHAIN_ID`             | `--chain-id`          | `1`（以太坊主网）            | 当前链 ID                          |
 | `DODO_API_KEY`         | —                     | 编译时内嵌默认值             | DODO 路由 API Key                  |
@@ -272,16 +272,20 @@ JSON 模式下，swap / approve / revoke 的 dry-run 不会签名或广播交易
 响应会保留原有预览字段，并额外包含稳定的外部 signer payload：
 `source`、`operation`、`chain_id`、`caip2`、`from`、
 `transaction { to, value, data, chain_id }`、可选 `quote` 和 `risk` metadata。
-`operation` 取值为 `swap_execute`、`approve` 或 `revoke`。兑换执行使用
-`--wallet` 传入 dry-run 钱包；approve / revoke 使用全局 `--wallet-address`。
-approve / revoke dry-run 会在 `transaction.data` 中返回 ERC-20
-`approve(address,uint256)` calldata。Privy 等外部 signer 系统仍需要在提交前
-自行执行授权、确认、预算和风险校验。
-所有外部 signer dry-run 都必须能解析出 sender wallet；如果缺少 signer、`--wallet`
-和全局 `--wallet-address/WALLET_ADDRESS`，命令会失败，而不是省略 `data.from`
-或 `data.transaction`。`--gas-limit` 和 `--max-fee-gwei` 会反映到未签名 swap
-交易 payload 中；dry-run 不调用 `eth_estimateGas`，因此 `--gas-buffer-pct` 和
-`--skip-estimate` 只影响 live execution。
+`operation` 取值为 `swap_execute`、`approve` 或 `revoke`。兑换执行优先使用
+`--wallet` 传入 dry-run 钱包；如果省略，会 fallback 到全局
+`--wallet-address/WALLET_ADDRESS` sender context。approve / revoke 使用全局
+`--wallet-address`。approve / revoke dry-run 会在 `transaction.data` 中返回
+ERC-20 `approve(address,uint256)` calldata。Privy 等外部 signer 系统仍需要在
+提交前自行执行授权、确认、预算和风险校验。
+所有外部 signer dry-run 都必须能解析出 sender wallet；无法解析时会失败，
+而不是省略 `data.from` 或 `data.transaction`。execute dry-run 会从 signer
+配置、`--wallet` 或全局 `--wallet-address/WALLET_ADDRESS` 解析 sender；
+approve / revoke dry-run 会从 signer 配置或全局
+`--wallet-address/WALLET_ADDRESS` 解析 sender。`--gas-limit` 和
+`--max-fee-gwei` 会反映到未签名 swap 交易 payload 中；dry-run 不调用
+`eth_estimateGas`，因此 `--gas-buffer-pct` 和 `--skip-estimate` 只影响 live
+execution。
 
 **查询交易状态：**
 ```bash

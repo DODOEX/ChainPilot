@@ -78,7 +78,7 @@ Supported environment variables are intentionally limited. Runtime config is rea
 | `KEYSTORE_PASSWORD_FILE` | `--password-file`   | —                              | Read keystore password from file               |
 | `KEYSTORE_PASSWORD_ENV` | `--password-env`     | —                              | Read keystore password from named env var      |
 | `KEYSTORE_PASSWORD`    | —                     | —                              | Default env var used for keystore password     |
-| `WALLET_ADDRESS`       | `--wallet-address`    | —                              | Wallet address for balance/simulate context    |
+| `WALLET_ADDRESS`       | `--wallet-address`    | —                              | Wallet address for balance/simulate and dry-run sender fallback |
 | `--rpc-url`            | CLI only              | Chain's built-in public RPC    | Explicit JSON-RPC override                     |
 | `CHAIN_ID`             | `--chain-id`          | `1` (Ethereum mainnet)         | Active chain ID                                |
 | `DODO_API_KEY`         | —                     | Compiled-in default            | DODO routing API key                           |
@@ -281,13 +281,18 @@ They include the legacy preview fields plus a stable external-signer payload:
 `source`, `operation`, `chain_id`, `caip2`, `from`,
 `transaction { to, value, data, chain_id }`, optional `quote`, and `risk`
 metadata. `operation` is one of `swap_execute`, `approve`, or `revoke`.
-For swaps, pass the dry-run wallet with `--wallet`; for approve/revoke, pass it
-with the global `--wallet-address`. Approve and revoke dry-runs include ERC-20
-`approve(address,uint256)` calldata in `transaction.data`. Systems such as
+For swaps, pass the dry-run wallet with `--wallet`; if omitted, execute dry-run
+falls back to the global `--wallet-address` / `WALLET_ADDRESS` sender context.
+For approve/revoke, pass the sender with the global `--wallet-address`.
+Approve and revoke dry-runs include ERC-20 `approve(address,uint256)` calldata
+in `transaction.data`. Systems such as
 Privy should still apply their own authorization, confirmation, budget, and risk
 checks before submitting the transaction.
 All external-signer dry-runs require a sender wallet and fail instead of
 omitting `data.from` or `data.transaction` when no sender can be resolved.
+Execute dry-run resolves the sender from signer config, `--wallet`, or global
+`--wallet-address` / `WALLET_ADDRESS`; approve/revoke dry-runs resolve it from
+signer config or global `--wallet-address` / `WALLET_ADDRESS`.
 `--gas-limit` and `--max-fee-gwei` are reflected in the unsigned swap
 transaction payload; dry-run does not call `eth_estimateGas`, so
 `--gas-buffer-pct` and `--skip-estimate` only affect live execution.

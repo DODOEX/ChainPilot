@@ -100,7 +100,7 @@ chainpilot [GLOBAL_FLAGS] <COMMAND> [SUBcommand_FLAGS]
 | `--keystore-path <path>` | `KEYSTORE_PATH` | — | Encrypted JSON keystore for write transactions |
 | `--password-file <path>` | `KEYSTORE_PASSWORD_FILE` | — | Read keystore password from file |
 | `--password-env <NAME>` | `KEYSTORE_PASSWORD_ENV` | — | Read keystore password from the named env var |
-| `--wallet-address <addr>` | `WALLET_ADDRESS` | — | Read-only wallet context |
+| `--wallet-address <addr>` | `WALLET_ADDRESS` | — | Read-only wallet context and dry-run sender fallback |
 | `--rpc-url <url>` | — | Chain's public RPC | Explicit JSON-RPC override |
 | `--chain-id <id>` | `CHAIN_ID` | `1` | Global chain context |
 
@@ -259,10 +259,12 @@ The JSON `data` object includes the legacy preview fields plus:
 | `quote` | Present for quote-derived swap execution |
 | `risk` | Token, amount, spender/router, and gas metadata when available |
 
-All external-signer dry-run commands require a sender wallet. Use `--wallet`
-for `swap execute --dry-run` and the global `--wallet-address` /
-`WALLET_ADDRESS` context for approve/revoke dry-runs. If no sender can be
-resolved, stop on the CLI error instead of treating the payload as usable.
+All external-signer dry-run commands require a sender wallet. For
+`swap execute --dry-run`, use `--wallet`; if it is omitted, the command falls
+back to the global `--wallet-address` / `WALLET_ADDRESS` sender context. For
+approve/revoke dry-runs, use the global `--wallet-address` / `WALLET_ADDRESS`
+context. If no sender can be resolved, stop on the CLI error instead of
+treating the payload as usable.
 
 External signer integrations must still perform their own authorization,
 confirmation, budget, and risk checks before submitting the transaction.
@@ -387,8 +389,8 @@ chainpilot --json swap execute --quote-id <ID> --dry-run --wallet <ADDR>
 
 | Flag | Description |
 |---|---|
-| `--dry-run` | Build an unsigned swap transaction payload without broadcasting — use `--wallet` instead of a signer |
-| `--wallet <ADDR>` | Wallet address for execute dry-run payloads (not `--wallet-address`) |
+| `--dry-run` | Build an unsigned swap transaction payload without broadcasting — use `--wallet` or global wallet context instead of a signer |
+| `--wallet <ADDR>` | Preferred wallet address for execute dry-run payloads; falls back to global `--wallet-address` / `WALLET_ADDRESS` when omitted |
 | `--wait` | Block until mined, print final on-chain status |
 | `--gas-limit <N>` | Hard-override gas limit |
 | `--max-fee-gwei <N>` | Override EIP-1559 max fee (in gwei) |

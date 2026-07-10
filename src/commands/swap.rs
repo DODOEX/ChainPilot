@@ -971,6 +971,35 @@ fn quote_token_in_amount_usd(quote: &Quote) -> Option<String> {
     Some((quote.from_amount_display * price_per_from).to_string())
 }
 
+fn approval_amount_usd_from_quote(
+    quote: Option<&Quote>,
+    token: &TokenRef,
+    raw_amount: &str,
+) -> Option<String> {
+    let quote = quote?;
+    let quote_token = &quote.from_token;
+    if token.chain_id != quote.chain_id
+        || token.decimals != quote_token.decimals
+        || !token.address.eq_ignore_ascii_case(&quote_token.address)
+    {
+        return None;
+    }
+    let price_per_from = quote
+        .raw_dodo_response
+        .get("resPricePerFromToken")
+        .and_then(|value| value.as_f64())?;
+    if price_per_from <= 0.0 || !price_per_from.is_finite() {
+        return None;
+    }
+    let amount = raw_amount_to_display(raw_amount, token.decimals)?
+        .parse::<f64>()
+        .ok()?;
+    if amount < 0.0 || !amount.is_finite() {
+        return None;
+    }
+    Some((amount * price_per_from).to_string())
+}
+
 fn build_dry_run_execute_payload(
     quote: &Quote,
     from_address: &str,
@@ -1621,6 +1650,8 @@ async fn approve(
                 ));
             }
         };
+        let approval_amount_usd =
+            approval_amount_usd_from_quote(quote.as_ref(), &token_ref, &raw_amount_str);
         let result = match build_dry_run_approval_result(
             ChainPilotOperation::Approve,
             chain_id,
@@ -1629,7 +1660,7 @@ async fn approve(
             spender_addr,
             amount_u256,
             raw_amount_str,
-            quote.as_ref().and_then(quote_token_in_amount_usd),
+            approval_amount_usd,
         ) {
             Ok(result) => result,
             Err(e) => {
@@ -2733,6 +2764,37 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, ChainError::Config(msg) if msg.contains("native token")));
+    }
+
+    #[test]
+    fn approval_amount_usd_from_quote_uses_actual_matching_approval_amount() {
+        let mut quote = sample_quote_for_approve(8453);
+        quote.from_amount_display = 100.0;
+        quote.raw_dodo_response = serde_json::json!({"resPricePerFromToken": 2.5});
+        let token = quote.from_token.clone();
+        let raw_amount = crate::commands::to_raw_amount("3", token.decimals).unwrap();
+
+        assert_eq!(
+            approval_amount_usd_from_quote(Some(&quote), &token, &raw_amount).as_deref(),
+            Some("7.5")
+        );
+    }
+
+    #[test]
+    fn approval_amount_usd_from_quote_omits_unavailable_or_mismatched_amounts() {
+        let mut quote = sample_quote_for_approve(8453);
+        quote.raw_dodo_response = serde_json::json!({"resPricePerFromToken": 2.5});
+        let mut other_token = quote.from_token.clone();
+        other_token.address = "0x2222222222222222222222222222222222222222".to_string();
+
+        assert_eq!(
+            approval_amount_usd_from_quote(Some(&quote), &other_token, "1000000"),
+            None
+        );
+        assert_eq!(
+            approval_amount_usd_from_quote(Some(&quote), &quote.from_token, "unlimited"),
+            None
+        );
     }
 
     #[test]
