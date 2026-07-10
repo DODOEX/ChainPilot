@@ -1019,7 +1019,8 @@ fn build_dry_run_execute_payload(
         .parse()
         .map_err(|_| ChainError::InvalidAddress(from_address.to_string()))?;
     let amount_in_raw = to_raw_amount(&quote.from_amount, quote.from_token.decimals)?;
-    let min_amount_display = raw_amount_to_display(&quote.to_amount_min, quote.to_token.decimals);
+    let min_amount_raw = to_raw_amount(&quote.to_amount_min, quote.to_token.decimals)?;
+    let min_amount_display = Some(quote.to_amount_min.clone());
 
     Ok((
         from_address.to_string(),
@@ -1057,7 +1058,7 @@ fn build_dry_run_execute_payload(
                 amount_raw: None,
                 amount_display: Some(quote.to_amount_display.to_string()),
                 amount_usd: None,
-                min_amount_raw: Some(quote.to_amount_min.clone()),
+                min_amount_raw: Some(min_amount_raw),
                 min_amount_display,
             }),
             spender: None,
@@ -2484,6 +2485,10 @@ mod tests {
             result.risk.token_in.as_ref().unwrap().amount_usd.as_deref(),
             Some("3000")
         );
+        let token_out = result.risk.token_out.as_ref().unwrap();
+        assert_eq!(token_out.amount_display.as_deref(), Some("3000"));
+        assert_eq!(token_out.min_amount_raw.as_deref(), Some("2970000000"));
+        assert_eq!(token_out.min_amount_display.as_deref(), Some("2970"));
     }
 
     #[tokio::test]
