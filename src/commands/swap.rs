@@ -900,7 +900,6 @@ async fn prepare_approve(
     api: &ApiClients,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    use crate::chain::{get_token_info, OnChainClient};
     use alloy::primitives::{Address, U256};
 
     let quote = match &args.quote_id {
@@ -937,37 +936,19 @@ async fn prepare_approve(
         args.spender.as_deref(),
         chain_id,
     )?;
-    let token_addr: Address = token_str
-        .parse()
-        .map_err(|_| ChainError::InvalidAddress(token_str.clone()))?;
     let spender_addr: Address = spender_str
         .parse()
         .map_err(|_| ChainError::InvalidAddress(spender_str.clone()))?;
-
-    let token_ref = if let Some(q) = &quote {
-        if q.from_token.address.to_lowercase() == token_str.to_lowercase() {
-            q.from_token.clone()
-        } else {
-            let chain_client = OnChainClient::for_chain(config, chain_id).await?;
-            let info = get_token_info(&chain_client, token_addr).await?;
-            TokenRef {
-                symbol: info.symbol,
-                address: token_addr.to_string(),
-                decimals: info.decimals,
-                chain_id,
-            }
-        }
-    } else if args.amount.is_some() {
-        let chain_client = OnChainClient::for_chain(config, chain_id).await?;
-        resolve_token(&token_str, chain_id, &chain_client, api, config, store).await?
-    } else {
-        TokenRef {
-            symbol: "ERC20".to_string(),
-            address: token_addr.to_string(),
-            decimals: 0,
-            chain_id,
-        }
-    };
+    let token_ref = resolve_prepare_approve_token_ref(
+        &token_str,
+        quote.as_ref(),
+        chain_id,
+        args.amount.as_deref(),
+        config,
+        store,
+        api,
+    )
+    .await?;
 
     let (amount_u256, raw_amount_str) = match args.amount {
         None => (U256::MAX, "unlimited".to_string()),
@@ -1159,6 +1140,58 @@ fn resolve_approve_targets(
     };
 
     Ok((token, spender))
+}
+
+fn prepare_approve_token_ref_from_quote_or_input(
+    quote: Option<&Quote>,
+    token_input: &str,
+) -> Option<TokenRef> {
+    let quote = quote?;
+    let from_token = &quote.from_token;
+    if from_token.address.eq_ignore_ascii_case(token_input)
+        || from_token.symbol.eq_ignore_ascii_case(token_input)
+    {
+        Some(from_token.clone())
+    } else {
+        None
+    }
+}
+
+async fn resolve_prepare_approve_token_ref(
+    token_input: &str,
+    quote: Option<&Quote>,
+    chain_id: u64,
+    amount: Option<&str>,
+    config: &AppConfig,
+    store: &QuoteStore,
+    api: &ApiClients,
+) -> Result<TokenRef> {
+    if let Some(token_ref) = prepare_approve_token_ref_from_quote_or_input(quote, token_input) {
+        return Ok(token_ref);
+    }
+
+    if let Ok(token_addr) = token_input.parse::<Address>() {
+        if quote.is_none() && amount.is_none() {
+            return Ok(TokenRef {
+                symbol: "ERC20".to_string(),
+                address: token_addr.to_string(),
+                decimals: 0,
+                chain_id,
+            });
+        }
+
+        let chain_client = OnChainClient::for_chain(config, chain_id).await?;
+        let info = crate::chain::get_token_info(&chain_client, token_addr).await?;
+        return Ok(TokenRef {
+            symbol: info.symbol,
+            address: token_addr.to_string(),
+            decimals: info.decimals,
+            chain_id,
+        });
+    }
+
+    let chain_client = OnChainClient::for_chain(config, chain_id).await?;
+    resolve_token(token_input, chain_id, &chain_client, api, config, store).await
 }
 
 fn approve_calldata(spender_addr: Address, amount_u256: alloy::primitives::U256) -> String {
@@ -2708,6 +2741,49 @@ mod tests {
             Some("0")
         );
         assert!(revoke.transaction.data.ends_with(&"0".repeat(64)));
+    }
+
+    #[test]
+    fn prepare_approve_symbol_token_matches_quote_from_token() {
+        let quote = sample_quote_for_approve(8453);
+        let token_ref =
+            prepare_approve_token_ref_from_quote_or_input(Some(&quote), "USDC").unwrap();
+
+        assert_eq!(token_ref.symbol, "USDC");
+        assert_eq!(token_ref.address, quote.from_token.address);
+        assert_eq!(token_ref.decimals, 6);
+        assert_eq!(token_ref.chain_id, 8453);
+    }
+
+    #[tokio::test]
+    async fn prepare_approve_symbol_token_resolves_custom_token_without_quote() {
+        let config = test_config(8453);
+        let store = QuoteStore::new(&config).unwrap();
+        store
+            .save_custom_token(&crate::models::token::CustomTokenRecord {
+                address: "0x2222222222222222222222222222222222222222".to_string(),
+                symbol: "USDC".to_string(),
+                name: "USD Coin".to_string(),
+                decimals: 6,
+                chain_id: 8453,
+                added_at: Utc::now(),
+                source: "test".to_string(),
+            })
+            .unwrap();
+        let api = ApiClients::new(&config).unwrap();
+
+        let token_ref =
+            resolve_prepare_approve_token_ref("USDC", None, 8453, None, &config, &store, &api)
+                .await
+                .unwrap();
+
+        assert_eq!(token_ref.symbol, "USDC");
+        assert_eq!(
+            token_ref.address,
+            "0x2222222222222222222222222222222222222222"
+        );
+        assert_eq!(token_ref.decimals, 6);
+        assert_eq!(token_ref.chain_id, 8453);
     }
 
     #[test]
