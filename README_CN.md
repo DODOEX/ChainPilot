@@ -244,6 +244,40 @@ chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --skip-estimat
 | `--gas-buffer-pct`  | 在 `eth_estimateGas` 结果上添加 N% 缓冲（如 `20` = +20%）       |
 | `--skip-estimate`   | 跳过 `eth_estimateGas`，直接使用报价中的 Gas 估算                |
 
+**外部 signer dry-run contract：**
+```bash
+# 从已保存报价生成兑换执行 payload
+chainpilot --json swap execute --quote-id <QUOTE_ID> --dry-run --wallet 0xYourAddress
+
+# 从已保存报价生成 ERC-20 授权 payload
+chainpilot --json swap approve --quote-id <QUOTE_ID> --dry-run --wallet-address 0xYourAddress
+
+# 显式指定 ERC-20 授权 payload
+chainpilot --json swap approve \
+  --token USDC \
+  --spender 0xSpenderAddr \
+  --amount 100 \
+  --dry-run \
+  --wallet-address 0xYourAddress
+
+# ERC-20 revoke payload
+chainpilot --json swap revoke \
+  --token 0xTokenAddr \
+  --spender 0xSpenderAddr \
+  --dry-run \
+  --wallet-address 0xYourAddress
+```
+
+JSON 模式下，swap / approve / revoke 的 dry-run 不会签名或广播交易。
+响应会保留原有预览字段，并额外包含稳定的外部 signer payload：
+`source`、`operation`、`chain_id`、`caip2`、`from`、
+`transaction { to, value, data, chain_id }`、可选 `quote` 和 `risk` metadata。
+`operation` 取值为 `swap_execute`、`approve` 或 `revoke`。兑换执行使用
+`--wallet` 传入 dry-run 钱包；approve / revoke 使用全局 `--wallet-address`。
+approve / revoke dry-run 会在 `transaction.data` 中返回 ERC-20
+`approve(address,uint256)` calldata。Privy 等外部 signer 系统仍需要在提交前
+自行执行授权、确认、预算和风险校验。
+
 **查询交易状态：**
 ```bash
 chainpilot swap status --tx-hash 0x...
@@ -273,7 +307,7 @@ chainpilot swap approve --token USDC --spender 0x... --amount 1000 --private-key
 chainpilot swap approve --token USDC --spender 0x... --private-key 0x...
 
 # 演习模式，预览但不发送
-chainpilot swap approve --quote-id <QUOTE_ID> --dry-run
+chainpilot --json swap approve --quote-id <QUOTE_ID> --dry-run --wallet-address 0xYourAddress
 ```
 
 **撤销授权：**
@@ -284,7 +318,7 @@ chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --private-key
 chainpilot --keystore-path ~/.chainpilot/main.json swap revoke --token 0xTokenAddr --spender 0xSpenderAddr
 
 # 演习模式
-chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --dry-run
+chainpilot --json swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --dry-run --wallet-address 0xYourAddress
 ```
 
 ### Token（代币）

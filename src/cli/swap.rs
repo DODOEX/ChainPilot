@@ -61,7 +61,7 @@ pub struct ExecuteArgs {
     #[arg(long)]
     pub quote_id: String,
 
-    /// Simulate execution without broadcasting the transaction
+    /// Dry-run: build an unsigned swap transaction payload without broadcasting
     #[arg(long)]
     pub dry_run: bool,
 
@@ -73,7 +73,7 @@ pub struct ExecuteArgs {
     #[arg(long)]
     pub max_fee_gwei: Option<f64>,
 
-    /// Wallet address for dry-run simulation (no private key needed; env: WALLET_ADDRESS)
+    /// Wallet address for dry-run payloads (no private key needed; env: WALLET_ADDRESS)
     #[arg(long, env = "WALLET_ADDRESS")]
     pub wallet: Option<String>,
 
@@ -126,19 +126,22 @@ pub struct ApproveArgs {
     #[arg(long)]
     pub amount: Option<String>,
 
-    /// Dry-run mode: show what would be approved without sending
+    /// Dry-run: build an unsigned ERC-20 approve payload without sending
     #[arg(long)]
     pub dry_run: bool,
 }
 
 #[derive(Args)]
 pub struct RevokeArgs {
+    /// Token contract address whose allowance should be revoked
     #[arg(long)]
     pub token: String,
 
+    /// Spender contract address whose allowance should be revoked
     #[arg(long)]
     pub spender: String,
 
+    /// Dry-run: build an unsigned ERC-20 revoke payload without sending
     #[arg(long)]
     pub dry_run: bool,
 }

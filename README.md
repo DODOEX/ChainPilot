@@ -279,9 +279,13 @@ chainpilot --json swap revoke \
 In JSON mode, dry-run swap/approve/revoke responses do not sign or broadcast.
 They include the legacy preview fields plus a stable external-signer payload:
 `source`, `operation`, `chain_id`, `caip2`, `from`,
-`transaction { to, value, data, chain_id }`, and `risk` metadata. Systems such
-as Privy should still apply their own authorization, confirmation, budget, and
-risk checks before submitting the transaction.
+`transaction { to, value, data, chain_id }`, optional `quote`, and `risk`
+metadata. `operation` is one of `swap_execute`, `approve`, or `revoke`.
+For swaps, pass the dry-run wallet with `--wallet`; for approve/revoke, pass it
+with the global `--wallet-address`. Approve and revoke dry-runs include ERC-20
+`approve(address,uint256)` calldata in `transaction.data`. Systems such as
+Privy should still apply their own authorization, confirmation, budget, and risk
+checks before submitting the transaction.
 
 **Check transaction status:**
 ```bash
