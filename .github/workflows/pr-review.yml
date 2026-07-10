@@ -1,0 +1,102 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Route the Responses API endpoint through a repo/org variable so it is not
+# hardcoded (leave RESPONSES_API_ENDPOINT unset to use the OpenAI default).
+env:
+  RESPONSES_API_ENDPOINT: ${{ vars.RESPONSES_API_ENDPOINT }}
+
+jobs:
+  review:
+    name: Codex Review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      final_message: ${{ steps.run_codex.outputs.final-message }}
+    steps:
+      - name: Checkout PR merge ref
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          persist-credentials: false
+
+      - name: Pre-fetch base and head refs for the PR
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --no-tags origin \
+            "$PR_BASE_REF" \
+            "+refs/pull/$PR_NUMBER/head"
+
+      - name: Run Codex
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          # Optional override, sourced from the RESPONSES_API_ENDPOINT variable.
+          # Empty string falls back to the OpenAI default endpoint.
+          responses-api-endpoint: ${{ env.RESPONSES_API_ENDPOINT }}
+          permission-profile: ":read-only"
+          prompt: |
+            This is PR #${{ github.event.pull_request.number }} for ${{ github.repository }}.
+            Review ONLY the changes introduced by the PR. Inspect the diff with:
+               git log --oneline ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+               git diff ${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}
+
+            `chainpilot` is a Rust DeFi CLI. Read AGENT.md for project conventions.
+            Give concise, specific, actionable feedback on bugs, correctness, and
+            design. Write your review in the same language as the PR title/description
+            (e.g. reply in Chinese if the PR is written in Chinese, English if English).
+            In ADDITION, always verify these project-specific concerns and call out
+            anything missing:
+
+            0. Output convention — all command output MUST go through
+               `crate::output::print_output`; direct `println!`/`print!` is forbidden
+               because it breaks `--json` mode. Flag any new direct stdout printing in
+               command handlers.
+
+            1. Help docs completeness & consistency — every new or changed command,
+               subcommand, flag, or argument must have accurate clap `--help`/`about`
+               text that matches the actual behavior. Flag any command whose help
+               text is missing, stale, or inconsistent with what the code does.
+
+            2. Skills — skills live in `skills/*/SKILL.md` (e.g. chainpilot,
+               evm-wallet). If the PR adds or changes user-facing commands, flags, or
+               workflows, confirm the relevant SKILL.md was updated to match. Flag any
+               gaps.
+
+            3. Multi-language README — both `README.md` (English) and `README_CN.md`
+               (Chinese) must stay in sync. If one was updated for this change, the
+               other must be too; new features must be documented in both. Flag any
+               README that is missing the update or out of sync with its counterpart.
+
+            If everything is complete on a given point, say so briefly rather than
+            inventing issues.
+
+  post_feedback:
+    name: Post Review Comment
+    runs-on: ubuntu-latest
+    needs: review
+    if: needs.review.outputs.final_message != ''
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Report Codex feedback
+        uses: actions/github-script@v7
+        env:
+          CODEX_FINAL_MESSAGE: ${{ needs.review.outputs.final_message }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: process.env.CODEX_FINAL_MESSAGE,
+            });
