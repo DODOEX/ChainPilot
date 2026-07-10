@@ -851,6 +851,15 @@ fn dry_run_from_address(
         .or(global_wallet)
 }
 
+fn require_dry_run_from_address(
+    derived_from_private_key: Option<String>,
+    subcommand_wallet: Option<String>,
+    global_wallet: Option<String>,
+) -> Result<String> {
+    dry_run_from_address(derived_from_private_key, subcommand_wallet, global_wallet)
+        .ok_or(ChainError::NoDryRunWallet)
+}
+
 fn resolve_effective_gas_limit(
     user_gas_limit: Option<u64>,
     skip_estimate: bool,
@@ -1113,7 +1122,7 @@ fn revoke_calldata(spender_addr: Address) -> String {
 fn build_dry_run_approval_result(
     operation: ChainPilotOperation,
     chain_id: u64,
-    from_address: Option<String>,
+    from_address: String,
     token: TokenRef,
     spender_addr: Address,
     amount_u256: alloy::primitives::U256,
@@ -1129,11 +1138,9 @@ fn build_dry_run_approval_result(
             token.symbol
         )));
     }
-    if let Some(from) = from_address.as_deref() {
-        let _from_addr: Address = from
-            .parse()
-            .map_err(|_| ChainError::InvalidAddress(from.to_string()))?;
-    }
+    let _from_addr: Address = from_address
+        .parse()
+        .map_err(|_| ChainError::InvalidAddress(from_address.clone()))?;
     let token_addr: Address = token
         .address
         .parse()
@@ -1150,12 +1157,12 @@ fn build_dry_run_approval_result(
         raw_amount: raw_amount.clone(),
         dry_run: true,
         tx_hash: None,
-        from_address: from_address.clone(),
+        from_address: Some(from_address.clone()),
         source: Some("chainpilot".to_string()),
         operation: Some(operation),
         chain_id: Some(chain_id),
         caip2: Some(format!("eip155:{chain_id}")),
-        r#from: from_address,
+        r#from: Some(from_address),
         transaction: Some(ChainPilotTransaction {
             to: token_addr.to_string(),
             value: "0x0".to_string(),
@@ -1283,14 +1290,13 @@ async fn execute_quote_with_deps<D: ExecuteDeps>(
     use std::time::Duration;
 
     let (from_address, tx_hash, status, gas_used, effective_gas_price_gwei) = if args.dry_run {
-        let addr = dry_run_from_address(
+        let addr = require_dry_run_from_address(
             crate::chain::resolve_signer(config)
                 .ok()
                 .map(|signer| signer.address().to_string()),
             args.wallet.clone(),
             config.wallet_address.clone(),
-        )
-        .ok_or(ChainError::NoDryRunWallet)?;
+        )?;
         (Some(addr), None, ExecutionStatus::DryRun, None, None)
     } else {
         let signer = crate::chain::resolve_signer(config)?;
@@ -1599,11 +1605,22 @@ async fn approve(
     };
 
     if args.dry_run || signer.is_none() {
-        let from_address = dry_run_from_address(
+        let from_address = require_dry_run_from_address(
             signer.as_ref().map(|signer| signer.address().to_string()),
             None,
             config.wallet_address.clone(),
         );
+        let from_address = match from_address {
+            Ok(from_address) => from_address,
+            Err(e) => {
+                return Ok(crate::output::print_output::<ApprovalResult>(
+                    Err(e),
+                    "swap.approve",
+                    output_mode,
+                    OutputContext::new(chain_id, true),
+                ));
+            }
+        };
         let result = match build_dry_run_approval_result(
             ChainPilotOperation::Approve,
             chain_id,
@@ -1723,12 +1740,23 @@ async fn revoke(args: RevokeArgs, config: &AppConfig, output_mode: OutputMode) -
             decimals: 0,
             chain_id,
         };
-        let from_address = dry_run_from_address(
+        let from_address = require_dry_run_from_address(
             signer.as_ref().map(|signer| signer.address().to_string()),
             None,
             config.wallet_address.clone(),
         );
-        let result = build_dry_run_approval_result(
+        let from_address = match from_address {
+            Ok(from_address) => from_address,
+            Err(e) => {
+                return Ok(crate::output::print_output::<ApprovalResult>(
+                    Err(e),
+                    "swap.revoke",
+                    output_mode,
+                    OutputContext::new(chain_id, true),
+                ));
+            }
+        };
+        let result = match build_dry_run_approval_result(
             ChainPilotOperation::Revoke,
             chain_id,
             from_address,
@@ -1737,7 +1765,17 @@ async fn revoke(args: RevokeArgs, config: &AppConfig, output_mode: OutputMode) -
             alloy::primitives::U256::ZERO,
             "0".to_string(),
             None,
-        )?;
+        ) {
+            Ok(result) => result,
+            Err(e) => {
+                return Ok(crate::output::print_output::<ApprovalResult>(
+                    Err(e),
+                    "swap.revoke",
+                    output_mode,
+                    OutputContext::new(chain_id, true),
+                ));
+            }
+        };
         let dry_run = result.dry_run;
         return Ok(crate::output::print_output::<ApprovalResult>(
             Ok(result),
@@ -2230,6 +2268,12 @@ mod tests {
     }
 
     #[test]
+    fn require_dry_run_from_address_errors_without_sender() {
+        let err = require_dry_run_from_address(None, None, None).unwrap_err();
+        assert!(matches!(err, ChainError::NoDryRunWallet));
+    }
+
+    #[test]
     fn resolve_effective_gas_limit_obeys_precedence_rules() {
         struct Case {
             user_gas_limit: Option<u64>,
@@ -2572,7 +2616,7 @@ mod tests {
         let result = build_dry_run_approval_result(
             ChainPilotOperation::Approve,
             8453,
-            Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A".to_string()),
+            "0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A".to_string(),
             token_ref.clone(),
             spender,
             alloy::primitives::U256::from(42u64),
@@ -2587,6 +2631,10 @@ mod tests {
         assert_eq!(result.caip2.as_deref(), Some("eip155:8453"));
         assert_eq!(
             result.r#from.as_deref(),
+            Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A")
+        );
+        assert_eq!(
+            result.from_address.as_deref(),
             Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A")
         );
         let tx = result.transaction.as_ref().unwrap();
@@ -2606,7 +2654,7 @@ mod tests {
         let revoke = build_dry_run_approval_result(
             ChainPilotOperation::Revoke,
             8453,
-            Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A".to_string()),
+            "0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A".to_string(),
             token_ref,
             spender,
             alloy::primitives::U256::ZERO,
@@ -2615,6 +2663,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(revoke.operation, Some(ChainPilotOperation::Revoke));
+        assert_eq!(
+            revoke.r#from.as_deref(),
+            Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A")
+        );
+        assert_eq!(
+            revoke.from_address.as_deref(),
+            Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A")
+        );
         assert!(revoke
             .transaction
             .as_ref()
@@ -2632,7 +2688,7 @@ mod tests {
         let err = build_dry_run_approval_result(
             ChainPilotOperation::Approve,
             8453,
-            Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A".to_string()),
+            "0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A".to_string(),
             native_token(8453),
             spender,
             alloy::primitives::U256::MAX,

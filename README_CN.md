@@ -277,10 +277,11 @@ JSON 模式下，swap / approve / revoke 的 dry-run 不会签名或广播交易
 approve / revoke dry-run 会在 `transaction.data` 中返回 ERC-20
 `approve(address,uint256)` calldata。Privy 等外部 signer 系统仍需要在提交前
 自行执行授权、确认、预算和风险校验。
-swap dry-run 必须能解析出 sender wallet；如果缺少 signer、`--wallet` 和全局
-`--wallet-address/WALLET_ADDRESS`，命令会失败，而不是省略 `data.transaction`。
-`--gas-limit` 和 `--max-fee-gwei` 会反映到未签名交易 payload 中；dry-run 不调用
-`eth_estimateGas`，因此 `--gas-buffer-pct` 和 `--skip-estimate` 只影响 live execution。
+所有外部 signer dry-run 都必须能解析出 sender wallet；如果缺少 signer、`--wallet`
+和全局 `--wallet-address/WALLET_ADDRESS`，命令会失败，而不是省略 `data.from`
+或 `data.transaction`。`--gas-limit` 和 `--max-fee-gwei` 会反映到未签名 swap
+交易 payload 中；dry-run 不调用 `eth_estimateGas`，因此 `--gas-buffer-pct` 和
+`--skip-estimate` 只影响 live execution。
 
 **查询交易状态：**
 ```bash

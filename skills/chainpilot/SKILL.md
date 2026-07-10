@@ -259,6 +259,11 @@ The JSON `data` object includes the legacy preview fields plus:
 | `quote` | Present for quote-derived swap execution |
 | `risk` | Token, amount, spender/router, and gas metadata when available |
 
+All external-signer dry-run commands require a sender wallet. Use `--wallet`
+for `swap execute --dry-run` and the global `--wallet-address` /
+`WALLET_ADDRESS` context for approve/revoke dry-runs. If no sender can be
+resolved, stop on the CLI error instead of treating the payload as usable.
+
 External signer integrations must still perform their own authorization,
 confirmation, budget, and risk checks before submitting the transaction.
 

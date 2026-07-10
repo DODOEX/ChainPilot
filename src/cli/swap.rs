@@ -110,7 +110,7 @@ pub struct HistoryArgs {
 
 #[derive(Args)]
 pub struct ApproveArgs {
-    /// Quote ID to derive token and spender from (uses from-token and router address)
+    /// Quote ID to derive token and spender from (uses from-token and DODOApprove contract)
     #[arg(long)]
     pub quote_id: Option<String>,
 
@@ -118,7 +118,7 @@ pub struct ApproveArgs {
     #[arg(long)]
     pub token: Option<String>,
 
-    /// Spender contract address (overrides quote's router address)
+    /// Spender contract address (overrides quote-derived DODOApprove contract)
     #[arg(long)]
     pub spender: Option<String>,
 

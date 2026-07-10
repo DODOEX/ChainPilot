@@ -286,11 +286,11 @@ with the global `--wallet-address`. Approve and revoke dry-runs include ERC-20
 `approve(address,uint256)` calldata in `transaction.data`. Systems such as
 Privy should still apply their own authorization, confirmation, budget, and risk
 checks before submitting the transaction.
-Swap dry-runs require a sender wallet and fail instead of omitting
-`data.transaction` when no sender can be resolved. `--gas-limit` and
-`--max-fee-gwei` are reflected in the unsigned transaction payload; dry-run does
-not call `eth_estimateGas`, so `--gas-buffer-pct` and `--skip-estimate` only
-affect live execution.
+All external-signer dry-runs require a sender wallet and fail instead of
+omitting `data.from` or `data.transaction` when no sender can be resolved.
+`--gas-limit` and `--max-fee-gwei` are reflected in the unsigned swap
+transaction payload; dry-run does not call `eth_estimateGas`, so
+`--gas-buffer-pct` and `--skip-estimate` only affect live execution.
 
 **Check transaction status:**
 ```bash
