@@ -252,6 +252,37 @@ chainpilot swap execute --quote-id <QUOTE_ID> --private-key 0x... --skip-estimat
 | `--gas-buffer-pct`  | Add N% buffer on top of `eth_estimateGas` result (e.g. `20` = +20%)     |
 | `--skip-estimate`   | Skip `eth_estimateGas` and use the quote's gas estimate directly         |
 
+**External signer dry-run contract:**
+```bash
+# Swap execution payload from a saved quote
+chainpilot --json swap execute --quote-id <QUOTE_ID> --dry-run --wallet 0xYourAddress
+
+# ERC-20 approval payload from a saved quote
+chainpilot --json swap approve --quote-id <QUOTE_ID> --dry-run --wallet-address 0xYourAddress
+
+# Explicit ERC-20 approval payload
+chainpilot --json swap approve \
+  --token USDC \
+  --spender 0xSpenderAddr \
+  --amount 100 \
+  --dry-run \
+  --wallet-address 0xYourAddress
+
+# ERC-20 revoke payload
+chainpilot --json swap revoke \
+  --token 0xTokenAddr \
+  --spender 0xSpenderAddr \
+  --dry-run \
+  --wallet-address 0xYourAddress
+```
+
+In JSON mode, dry-run swap/approve/revoke responses do not sign or broadcast.
+They include the legacy preview fields plus a stable external-signer payload:
+`source`, `operation`, `chain_id`, `caip2`, `from`,
+`transaction { to, value, data, chain_id }`, and `risk` metadata. Systems such
+as Privy should still apply their own authorization, confirmation, budget, and
+risk checks before submitting the transaction.
+
 **Check transaction status:**
 ```bash
 chainpilot swap status --tx-hash 0x...
@@ -281,7 +312,7 @@ chainpilot swap approve --token USDC --spender 0x... --amount 1000 --private-key
 chainpilot swap approve --token USDC --spender 0x... --private-key 0x...
 
 # Dry-run to preview without sending
-chainpilot swap approve --quote-id <QUOTE_ID> --dry-run
+chainpilot --json swap approve --quote-id <QUOTE_ID> --dry-run --wallet-address 0xYourAddress
 ```
 
 **Revoke an approval:**
@@ -292,7 +323,7 @@ chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --private-key
 chainpilot --keystore-path ~/.chainpilot/main.json swap revoke --token 0xTokenAddr --spender 0xSpenderAddr
 
 # Dry-run
-chainpilot swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --dry-run
+chainpilot --json swap revoke --token 0xTokenAddr --spender 0xSpenderAddr --dry-run --wallet-address 0xYourAddress
 ```
 
 ### Token

@@ -15,7 +15,10 @@ use crate::commands::{parse_display_amount, resolve_token, to_raw_amount};
 use crate::config::AppConfig;
 use crate::error::{ChainError, Result};
 use crate::models::quote::{Quote, QuoteRequest, RouteHop, TokenRef};
-use crate::models::swap::{ExecutionResult, ExecutionStatus, SimulationResult};
+use crate::models::swap::{
+    ChainPilotOperation, ChainPilotQuote, ChainPilotRisk, ChainPilotTokenAmount,
+    ChainPilotTransaction, ExecutionResult, ExecutionStatus, SimulationResult,
+};
 use crate::output::{OutputContext, OutputMode};
 use crate::store::QuoteStore;
 use alloy::primitives::Address;
@@ -285,9 +288,9 @@ fn swap_non_evm_tx_hash_error(raw: &str) -> Option<ChainError> {
 
     // base58-shaped strings ≥ 32 chars are Solana signatures (~88 typical).
     let looks_base58 = !trimmed.is_empty()
-        && trimmed.bytes().all(|b| {
-            b.is_ascii_alphanumeric() && b != b'0' && b != b'O' && b != b'I' && b != b'l'
-        });
+        && trimmed
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() && b != b'0' && b != b'O' && b != b'I' && b != b'l');
     if looks_base58 && trimmed.len() >= 32 {
         return Some(ChainError::Config(
             "swap status is not supported for Solana — DODO swap history only tracks EVM transactions".to_string(),
@@ -313,7 +316,7 @@ pub async fn handle(
         SwapAction::Execute(args) => execute(args, config, store, output_mode).await,
         SwapAction::Status(args) => status(args, config, output_mode).await,
         SwapAction::History(args) => history(args, config, store, output_mode).await,
-        SwapAction::Approve(args) => approve(args, config, store, output_mode).await,
+        SwapAction::Approve(args) => approve(args, config, store, api, output_mode).await,
         SwapAction::Revoke(args) => revoke(args, config, output_mode).await,
     }
 }
@@ -412,7 +415,8 @@ async fn build_svm_quote(args: &QuoteArgs, api: &ApiClients) -> Result<Quote> {
     // Resolve both mints via Jupiter for decimals + symbol. The two lookups are
     // independent, so run them concurrently. A miss means the mint isn't in
     // Jupiter's index, so it isn't routable here.
-    let (from_res, to_res) = tokio::join!(api.jupiter.token(&args.from), api.jupiter.token(&args.to));
+    let (from_res, to_res) =
+        tokio::join!(api.jupiter.token(&args.from), api.jupiter.token(&args.to));
     let from_meta = from_res?.ok_or_else(|| {
         ChainError::Config(format!("Solana mint not found on Jupiter: {}", args.from))
     })?;
@@ -427,7 +431,12 @@ async fn build_svm_quote(args: &QuoteArgs, api: &ApiClients) -> Result<Quote> {
 
     let jq = api
         .jupiter
-        .quote(&from_meta.address, &to_meta.address, &amount_raw, slippage_bps)
+        .quote(
+            &from_meta.address,
+            &to_meta.address,
+            &amount_raw,
+            slippage_bps,
+        )
         .await?;
 
     let to_amount_display = raw_to_display(&jq.out_amount, to_meta.decimals);
@@ -457,8 +466,7 @@ async fn build_svm_quote(args: &QuoteArgs, api: &ApiClients) -> Result<Quote> {
     }
 
     let now = Utc::now();
-    let expires_at =
-        now + std::time::Duration::from_secs(crate::config::DEFAULT_QUOTE_TTL_SECS);
+    let expires_at = now + std::time::Duration::from_secs(crate::config::DEFAULT_QUOTE_TTL_SECS);
 
     Ok(Quote {
         quote_id: uuid::Uuid::new_v4(),
@@ -866,6 +874,147 @@ fn resolve_effective_gas_limit(
     })
 }
 
+fn optional_u64_to_hex(value: Option<u64>) -> Option<String> {
+    value.map(|v| format!("0x{v:x}"))
+}
+
+fn decimal_or_hex_to_hex(value: &str) -> Result<String> {
+    if value.is_empty() {
+        return Ok("0x0".to_string());
+    }
+    if let Some(hex) = value.strip_prefix("0x") {
+        if hex.is_empty() {
+            return Ok("0x0".to_string());
+        }
+        let parsed = alloy::primitives::U256::from_str_radix(hex, 16)
+            .map_err(|_| ChainError::InvalidAmount(value.to_string()))?;
+        return Ok(format!("0x{:x}", parsed));
+    }
+    let parsed = alloy::primitives::U256::from_str_radix(value, 10)
+        .map_err(|_| ChainError::InvalidAmount(value.to_string()))?;
+    Ok(format!("0x{:x}", parsed))
+}
+
+fn slippage_bps(slippage_pct: f64) -> Option<u64> {
+    if slippage_pct.is_finite() && slippage_pct >= 0.0 {
+        Some((slippage_pct * 100.0).round() as u64)
+    } else {
+        None
+    }
+}
+
+fn raw_amount_to_display(raw: &str, decimals: u8) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.starts_with('-') {
+        return None;
+    }
+    let scale = 10usize.saturating_pow(decimals as u32);
+    if scale == 0 {
+        return Some(raw.to_string());
+    }
+    let padded = if raw.len() <= decimals as usize {
+        let zeros = "0".repeat(decimals as usize + 1 - raw.len());
+        format!("{zeros}{raw}")
+    } else {
+        raw.to_string()
+    };
+    let split = padded.len().saturating_sub(decimals as usize);
+    let (whole, frac) = padded.split_at(split);
+    let frac = frac.trim_end_matches('0');
+    if frac.is_empty() {
+        Some(whole.to_string())
+    } else {
+        Some(format!("{whole}.{frac}"))
+    }
+}
+
+fn token_address_for_payload(token: &TokenRef) -> Option<String> {
+    if token
+        .address
+        .eq_ignore_ascii_case(crate::config::chains::NATIVE_ADDR)
+    {
+        None
+    } else {
+        Some(token.address.clone())
+    }
+}
+
+fn quote_token_in_amount_usd(quote: &Quote) -> Option<String> {
+    let price_per_from = quote
+        .raw_dodo_response
+        .get("resPricePerFromToken")
+        .and_then(|value| value.as_f64())?;
+    if price_per_from <= 0.0 || !price_per_from.is_finite() {
+        return None;
+    }
+    Some((quote.from_amount_display * price_per_from).to_string())
+}
+
+fn build_dry_run_execute_payload(
+    quote: &Quote,
+    from_address: &str,
+) -> Result<(
+    String,
+    ChainPilotTransaction,
+    ChainPilotQuote,
+    ChainPilotRisk,
+)> {
+    let _to_addr: Address = quote
+        .router_to
+        .parse()
+        .map_err(|_| ChainError::InvalidAddress(quote.router_to.clone()))?;
+    let _from_addr: Address = from_address
+        .parse()
+        .map_err(|_| ChainError::InvalidAddress(from_address.to_string()))?;
+    let amount_in_raw = to_raw_amount(&quote.from_amount, quote.from_token.decimals)?;
+    let min_amount_display = raw_amount_to_display(&quote.to_amount_min, quote.to_token.decimals);
+
+    Ok((
+        from_address.to_string(),
+        ChainPilotTransaction {
+            to: quote.router_to.clone(),
+            value: decimal_or_hex_to_hex(&quote.value)?,
+            data: quote.calldata.clone(),
+            chain_id: quote.chain_id,
+            gas: optional_u64_to_hex(quote.estimated_gas.or(quote.gas_limit)),
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+        },
+        ChainPilotQuote {
+            quote_id: quote.quote_id.to_string(),
+            expires_at: Some(quote.expires_at),
+            slippage_bps: slippage_bps(quote.slippage),
+        },
+        ChainPilotRisk {
+            token_in: Some(ChainPilotTokenAmount {
+                chain_id: quote.chain_id,
+                address: token_address_for_payload(&quote.from_token),
+                symbol: quote.from_token.symbol.clone(),
+                decimals: quote.from_token.decimals,
+                amount_raw: Some(amount_in_raw),
+                amount_display: Some(quote.from_amount_display.to_string()),
+                amount_usd: quote_token_in_amount_usd(quote),
+                min_amount_raw: None,
+                min_amount_display: None,
+            }),
+            token_out: Some(ChainPilotTokenAmount {
+                chain_id: quote.chain_id,
+                address: token_address_for_payload(&quote.to_token),
+                symbol: quote.to_token.symbol.clone(),
+                decimals: quote.to_token.decimals,
+                amount_raw: None,
+                amount_display: Some(quote.to_amount_display.to_string()),
+                amount_usd: None,
+                min_amount_raw: Some(quote.to_amount_min.clone()),
+                min_amount_display,
+            }),
+            spender: None,
+            router: Some(quote.router_to.clone()),
+            estimated_gas_usd: quote.estimated_gas_usd.map(|v| v.to_string()),
+        },
+    ))
+}
+
 fn resolve_approve_targets(
     explicit_token: Option<&str>,
     quote: Option<&Quote>,
@@ -897,6 +1046,36 @@ fn resolve_approve_targets(
     Ok((token, spender))
 }
 
+fn approve_token_ref_from_quote_or_input(
+    quote: Option<&Quote>,
+    token_input: &str,
+) -> Option<TokenRef> {
+    let quote = quote?;
+    let from_token = &quote.from_token;
+    if token_input.eq_ignore_ascii_case(&from_token.address)
+        || token_input.eq_ignore_ascii_case(&from_token.symbol)
+    {
+        Some(from_token.clone())
+    } else {
+        None
+    }
+}
+
+async fn resolve_approve_token_ref(
+    token_input: &str,
+    quote: Option<&Quote>,
+    chain_id: u64,
+    onchain: &OnChainClient,
+    api: &ApiClients,
+    config: &AppConfig,
+    store: &QuoteStore,
+) -> Result<TokenRef> {
+    if let Some(token_ref) = approve_token_ref_from_quote_or_input(quote, token_input) {
+        return Ok(token_ref);
+    }
+    resolve_token(token_input, chain_id, onchain, api, config, store).await
+}
+
 fn approve_calldata(spender_addr: Address, amount_u256: alloy::primitives::U256) -> String {
     let selector = [0x09u8, 0x5e, 0xa7, 0xb3];
     let mut calldata = Vec::with_capacity(68);
@@ -915,6 +1094,82 @@ fn revoke_calldata(spender_addr: Address) -> String {
     calldata.extend_from_slice(spender_addr.as_slice());
     calldata.extend_from_slice(&[0u8; 32]);
     format!("0x{}", hex::encode(&calldata))
+}
+
+fn build_dry_run_approval_result(
+    operation: ChainPilotOperation,
+    chain_id: u64,
+    from_address: Option<String>,
+    token: TokenRef,
+    spender_addr: Address,
+    amount_u256: alloy::primitives::U256,
+    raw_amount: String,
+    amount_usd: Option<String>,
+) -> Result<crate::models::swap::ApprovalResult> {
+    if token
+        .address
+        .eq_ignore_ascii_case(crate::config::chains::NATIVE_ADDR)
+    {
+        return Err(ChainError::Config(format!(
+            "native token {} does not require ERC-20 approval",
+            token.symbol
+        )));
+    }
+    if let Some(from) = from_address.as_deref() {
+        let _from_addr: Address = from
+            .parse()
+            .map_err(|_| ChainError::InvalidAddress(from.to_string()))?;
+    }
+    let token_addr: Address = token
+        .address
+        .parse()
+        .map_err(|_| ChainError::InvalidAddress(token.address.clone()))?;
+    let calldata = match operation {
+        ChainPilotOperation::Approve => approve_calldata(spender_addr, amount_u256),
+        ChainPilotOperation::Revoke => revoke_calldata(spender_addr),
+        ChainPilotOperation::SwapExecute => unreachable!("approval dry-run does not execute swaps"),
+    };
+
+    Ok(crate::models::swap::ApprovalResult {
+        token: token_addr.to_string(),
+        spender: spender_addr.to_string(),
+        raw_amount: raw_amount.clone(),
+        dry_run: true,
+        tx_hash: None,
+        from_address: from_address.clone(),
+        source: Some("chainpilot".to_string()),
+        operation: Some(operation),
+        chain_id: Some(chain_id),
+        caip2: Some(format!("eip155:{chain_id}")),
+        r#from: from_address,
+        transaction: Some(ChainPilotTransaction {
+            to: token_addr.to_string(),
+            value: "0x0".to_string(),
+            data: calldata,
+            chain_id,
+            gas: None,
+            max_fee_per_gas: None,
+            max_priority_fee_per_gas: None,
+        }),
+        quote: None,
+        risk: ChainPilotRisk {
+            token_in: Some(ChainPilotTokenAmount {
+                chain_id,
+                address: Some(token_addr.to_string()),
+                symbol: token.symbol,
+                decimals: token.decimals,
+                amount_raw: Some(raw_amount),
+                amount_display: None,
+                amount_usd,
+                min_amount_raw: None,
+                min_amount_display: None,
+            }),
+            token_out: None,
+            spender: Some(spender_addr.to_string()),
+            router: None,
+            estimated_gas_usd: None,
+        },
+    })
 }
 
 async fn send_approval_with_deps<D: ApprovalDeps>(
@@ -938,6 +1193,14 @@ async fn send_approval_with_deps<D: ApprovalDeps>(
         dry_run: false,
         tx_hash: Some(tx_hash),
         from_address: Some(from_addr.to_string()),
+        source: None,
+        operation: None,
+        chain_id: None,
+        caip2: None,
+        r#from: None,
+        transaction: None,
+        quote: None,
+        risk: ChainPilotRisk::default(),
     })
 }
 
@@ -1110,9 +1373,33 @@ async fn execute_quote_with_deps<D: ExecuteDeps>(
         calldata: quote_data.calldata.clone(),
         to_contract: quote_data.router_to.clone(),
         value_eth: quote_data.value.clone(),
-        from_address,
+        from_address: from_address.clone(),
         gas_used,
         effective_gas_price_gwei,
+        source: None,
+        operation: None,
+        chain_id: None,
+        caip2: None,
+        r#from: None,
+        transaction: None,
+        quote: None,
+        risk: ChainPilotRisk::default(),
+    })
+    .and_then(|mut result| {
+        if args.dry_run {
+            if let Some(from) = from_address.as_deref() {
+                let (from, tx, quote, risk) = build_dry_run_execute_payload(quote_data, from)?;
+                result.source = Some("chainpilot".to_string());
+                result.operation = Some(ChainPilotOperation::SwapExecute);
+                result.chain_id = Some(quote_data.chain_id);
+                result.caip2 = Some(format!("eip155:{}", quote_data.chain_id));
+                result.r#from = Some(from);
+                result.transaction = Some(tx);
+                result.quote = Some(quote);
+                result.risk = risk;
+            }
+        }
+        Ok(result)
     })
 }
 
@@ -1190,9 +1477,10 @@ async fn approve(
     args: ApproveArgs,
     config: &AppConfig,
     store: &QuoteStore,
+    api: &ApiClients,
     output_mode: OutputMode,
 ) -> Result<ExitCode> {
-    use crate::chain::{get_token_info, OnChainClient};
+    use crate::chain::OnChainClient;
     use crate::models::swap::ApprovalResult;
     use alloy::primitives::{Address, U256};
 
@@ -1217,23 +1505,38 @@ async fn approve(
         chain_id,
     )?;
 
-    let token_addr: Address = token_str
-        .parse()
-        .map_err(|_| ChainError::InvalidAddress(token_str.clone()))?;
     let spender_addr: Address = spender_str
         .parse()
         .map_err(|_| ChainError::InvalidAddress(spender_str.clone()))?;
-
-    // Get token decimals (for amount conversion): quote is authoritative, else on-chain.
-    let decimals: u8 = if let Some(q) = &quote {
-        if q.from_token.address.to_lowercase() == token_str.to_lowercase() {
-            q.from_token.decimals
-        } else {
-            get_token_info(onchain, token_addr).await?.decimals
+    let token_ref = match resolve_approve_token_ref(
+        &token_str,
+        quote.as_ref(),
+        chain_id,
+        onchain,
+        api,
+        config,
+        store,
+    )
+    .await
+    {
+        Ok(token_ref) => token_ref,
+        Err(e) => {
+            return Ok(crate::output::print_output::<ApprovalResult>(
+                Err(e),
+                "swap.approve",
+                output_mode,
+                OutputContext::new(chain_id, args.dry_run),
+            ));
         }
-    } else {
-        get_token_info(onchain, token_addr).await?.decimals
     };
+    let token_addr: Address = token_ref
+        .address
+        .parse()
+        .map_err(|_| ChainError::InvalidAddress(token_ref.address.clone()))?;
+
+    // Token resolution already returns authoritative decimals for quote,
+    // tokenlist/custom-token, native-token, and address lookup paths.
+    let decimals: u8 = token_ref.decimals;
 
     // Compute raw approval amount.
     let (amount_u256, raw_amount_str) = match args.amount {
@@ -1276,13 +1579,30 @@ async fn approve(
     };
 
     if args.dry_run || signer.is_none() {
-        let result = ApprovalResult {
-            token: token_addr.to_string(),
-            spender: spender_addr.to_string(),
-            raw_amount: raw_amount_str,
-            dry_run: true,
-            tx_hash: None,
-            from_address: signer.as_ref().map(|signer| signer.address().to_string()),
+        let from_address = dry_run_from_address(
+            signer.as_ref().map(|signer| signer.address().to_string()),
+            None,
+            config.wallet_address.clone(),
+        );
+        let result = match build_dry_run_approval_result(
+            ChainPilotOperation::Approve,
+            chain_id,
+            from_address,
+            token_ref,
+            spender_addr,
+            amount_u256,
+            raw_amount_str,
+            quote.as_ref().and_then(quote_token_in_amount_usd),
+        ) {
+            Ok(result) => result,
+            Err(e) => {
+                return Ok(crate::output::print_output::<ApprovalResult>(
+                    Err(e),
+                    "swap.approve",
+                    output_mode,
+                    OutputContext::new(chain_id, true),
+                ));
+            }
         };
         let dry_run = result.dry_run;
         return Ok(crate::output::print_output::<ApprovalResult>(
@@ -1377,14 +1697,27 @@ async fn revoke(args: RevokeArgs, config: &AppConfig, output_mode: OutputMode) -
     };
 
     if args.dry_run || signer.is_none() {
-        let result = ApprovalResult {
-            token: token_addr.to_string(),
-            spender: spender_addr.to_string(),
-            raw_amount: "0".to_string(),
-            dry_run: true,
-            tx_hash: None,
-            from_address: signer.as_ref().map(|signer| signer.address().to_string()),
+        let token_ref = TokenRef {
+            symbol: "UNKNOWN".to_string(),
+            address: token_addr.to_string(),
+            decimals: 0,
+            chain_id,
         };
+        let from_address = dry_run_from_address(
+            signer.as_ref().map(|signer| signer.address().to_string()),
+            None,
+            config.wallet_address.clone(),
+        );
+        let result = build_dry_run_approval_result(
+            ChainPilotOperation::Revoke,
+            chain_id,
+            from_address,
+            token_ref,
+            spender_addr,
+            alloy::primitives::U256::ZERO,
+            "0".to_string(),
+            None,
+        )?;
         let dry_run = result.dry_run;
         return Ok(crate::output::print_output::<ApprovalResult>(
             Ok(result),
@@ -1987,6 +2320,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn execute_quote_dry_run_builds_chainpilot_unsigned_transaction_contract() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.dry_run = true;
+        args.wallet = Some("0x2222222222222222222222222222222222222222".to_string());
+        let mut quote = sample_quote(8453);
+        quote.value = "1000000000000000".to_string();
+        quote.raw_dodo_response = serde_json::json!({"resPricePerFromToken": 3000.0});
+
+        let result = execute_quote_with_deps(&deps, &args, &test_config(8453), &quote)
+            .await
+            .unwrap();
+
+        assert_eq!(result.source.as_deref(), Some("chainpilot"));
+        assert_eq!(result.operation, Some(ChainPilotOperation::SwapExecute));
+        assert_eq!(result.chain_id, Some(8453));
+        assert_eq!(result.caip2.as_deref(), Some("eip155:8453"));
+        assert_eq!(
+            result.r#from.as_deref(),
+            Some("0x2222222222222222222222222222222222222222")
+        );
+        let tx = result.transaction.as_ref().unwrap();
+        assert_eq!(tx.to, quote.router_to);
+        assert_eq!(tx.value, "0x38d7ea4c68000");
+        assert_eq!(tx.data, quote.calldata);
+        assert_eq!(tx.chain_id, 8453);
+        assert_eq!(tx.gas.as_deref(), Some("0x2bf20"));
+        assert_eq!(
+            result.quote.as_ref().unwrap().quote_id,
+            quote.quote_id.to_string()
+        );
+        assert_eq!(result.quote.as_ref().unwrap().slippage_bps, Some(50));
+        assert_eq!(
+            result.risk.router.as_deref(),
+            Some(quote.router_to.as_str())
+        );
+        assert_eq!(
+            result.risk.token_in.as_ref().unwrap().amount_usd.as_deref(),
+            Some("3000")
+        );
+    }
+
+    #[tokio::test]
     async fn execute_quote_rejects_invalid_router_before_sending() {
         let deps = MockExecuteDeps {
             estimated_gas: Ok(21_000),
@@ -2079,6 +2460,127 @@ mod tests {
         assert_eq!(effective_chain_id, 42161);
         assert_eq!(resolved.0, quote.from_token.address);
         assert!(resolved.1.starts_with("0x"));
+    }
+
+    #[tokio::test]
+    async fn approve_symbol_token_resolves_custom_token_without_quote() {
+        let config = test_config(8453);
+        let store = QuoteStore::new(&config).unwrap();
+        store
+            .save_custom_token(&crate::models::token::CustomTokenRecord {
+                address: "0x2222222222222222222222222222222222222222".to_string(),
+                symbol: "USDC".to_string(),
+                name: "USD Coin".to_string(),
+                decimals: 6,
+                chain_id: 8453,
+                added_at: Utc::now(),
+                source: "test".to_string(),
+            })
+            .unwrap();
+        let api = ApiClients::new(&config).unwrap();
+        let chain_client = OnChainClient::for_chain(&config, 8453).await.unwrap();
+
+        let token_ref =
+            resolve_approve_token_ref("USDC", None, 8453, &chain_client, &api, &config, &store)
+                .await
+                .unwrap();
+
+        assert_eq!(token_ref.symbol, "USDC");
+        assert_eq!(
+            token_ref.address,
+            "0x2222222222222222222222222222222222222222"
+        );
+        assert_eq!(token_ref.decimals, 6);
+    }
+
+    #[test]
+    fn approval_dry_run_builds_chainpilot_unsigned_transaction_contract() {
+        let token: Address = "0x2222222222222222222222222222222222222222"
+            .parse()
+            .unwrap();
+        let spender: Address = "0x3333333333333333333333333333333333333333"
+            .parse()
+            .unwrap();
+        let token_ref = TokenRef {
+            symbol: "TEST".to_string(),
+            address: token.to_string(),
+            decimals: 6,
+            chain_id: 8453,
+        };
+
+        let result = build_dry_run_approval_result(
+            ChainPilotOperation::Approve,
+            8453,
+            Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A".to_string()),
+            token_ref.clone(),
+            spender,
+            alloy::primitives::U256::from(42u64),
+            "42".to_string(),
+            Some("123.45".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(result.source.as_deref(), Some("chainpilot"));
+        assert_eq!(result.operation, Some(ChainPilotOperation::Approve));
+        assert_eq!(result.chain_id, Some(8453));
+        assert_eq!(result.caip2.as_deref(), Some("eip155:8453"));
+        assert_eq!(
+            result.r#from.as_deref(),
+            Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A")
+        );
+        let tx = result.transaction.as_ref().unwrap();
+        assert_eq!(tx.to, token.to_string());
+        assert_eq!(tx.value, "0x0");
+        assert_eq!(tx.chain_id, 8453);
+        assert!(tx.data.starts_with("0x095ea7b3"));
+        assert_eq!(
+            result.risk.spender.as_deref(),
+            Some(spender.to_string().as_str())
+        );
+        assert_eq!(
+            result.risk.token_in.as_ref().unwrap().amount_usd.as_deref(),
+            Some("123.45")
+        );
+
+        let revoke = build_dry_run_approval_result(
+            ChainPilotOperation::Revoke,
+            8453,
+            Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A".to_string()),
+            token_ref,
+            spender,
+            alloy::primitives::U256::ZERO,
+            "0".to_string(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(revoke.operation, Some(ChainPilotOperation::Revoke));
+        assert!(revoke
+            .transaction
+            .as_ref()
+            .unwrap()
+            .data
+            .ends_with(&"0".repeat(64)));
+    }
+
+    #[test]
+    fn approval_dry_run_rejects_native_token_payload() {
+        let spender: Address = "0x3333333333333333333333333333333333333333"
+            .parse()
+            .unwrap();
+
+        let err = build_dry_run_approval_result(
+            ChainPilotOperation::Approve,
+            8453,
+            Some("0x49Ca8a959a78E926a928Eb0c1c05679a94985a2A".to_string()),
+            native_token(8453),
+            spender,
+            alloy::primitives::U256::MAX,
+            "unlimited".to_string(),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, ChainError::Config(msg) if msg.contains("native token")));
     }
 
     #[test]
