@@ -728,9 +728,12 @@ async fn simulate(
                                     has_sufficient_balance = Some(bal >= from_amount_raw);
                                     wallet_balance = Some(raw_balance);
 
-                                    match quote_data.router_to.parse::<Address>() {
+                                    let spender = crate::config::chain_config(chain_id)
+                                        .map(|chain| chain.contracts.dodo_approve)
+                                        .unwrap_or(quote_data.router_to.as_str());
+                                    match spender.parse::<Address>() {
                                         Err(_) => warnings
-                                            .push("Invalid router address in quote.".to_string()),
+                                            .push("Invalid DODO approve address.".to_string()),
                                         Ok(spender_addr) => {
                                             match get_allowance(
                                                 onchain,
@@ -960,15 +963,73 @@ fn token_address_for_payload(token: &TokenRef) -> Option<String> {
     }
 }
 
-fn quote_token_in_amount_usd(quote: &Quote) -> Option<String> {
-    let price_per_from = quote
-        .raw_dodo_response
-        .get("resPricePerFromToken")
-        .and_then(|value| value.as_f64())?;
-    if price_per_from <= 0.0 || !price_per_from.is_finite() {
-        return None;
+fn is_trusted_usd_stablecoin(token: &TokenRef) -> bool {
+    trusted_usd_stablecoin_addresses(token.chain_id)
+        .iter()
+        .any(|addr| token.address.eq_ignore_ascii_case(addr))
+}
+
+fn trusted_usd_stablecoin_addresses(chain_id: u64) -> &'static [&'static str] {
+    match chain_id {
+        1 => &[
+            "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", // USDC
+            "0xdAC17F958D2ee523a2206206994597C13D831ec7", // USDT
+            "0x6B175474E89094C44Da98b954EedeAC495271d0F", // DAI
+        ],
+        10 => &[
+            "0x0b2C639c533813f4Aa9D7837CAF62653d097Ff85", // USDC
+            "0x7F5c764cBc14f9669B88837ca1490cCa17c31607", // USDC.e
+            "0x94b008aD5cdEdDfb7C803f7eFf9F18B6eB2F1384", // USDT
+            "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", // DAI
+        ],
+        56 => &[
+            "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", // USDC
+            "0x55d398326f99059fF775485246999027B3197955", // USDT
+            "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3", // DAI
+        ],
+        137 => &[
+            "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", // USDC
+            "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174", // USDC.e
+            "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", // USDT
+            "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063", // DAI
+        ],
+        8453 => &[
+            "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC
+            "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", // USDbC
+        ],
+        42161 => &[
+            "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", // USDC
+            "0xFF970A61A04b1cA14834A43f5dE4533eBDDB5CC8", // USDC.e
+            "0xFd086bC7CD5C481DCC9C85ebe478A1C0b69FCbb9", // USDT
+            "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", // DAI
+        ],
+        43114 => &[
+            "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", // USDC
+            "0xA7D7079b0FEaD91F3e65f86E8915Cb59c1a4C664", // USDC.e
+            "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", // USDT
+            "0xc7198437980c041c805A1EDcbA50c1Ce5db95118", // USDT.e
+            "0xd586E7F844cEa2F87f50152665BCbc2C279D8d70", // DAI.e
+        ],
+        _ => &[],
     }
-    Some((quote.from_amount_display * price_per_from).to_string())
+}
+
+fn finite_non_negative_amount(value: f64) -> Option<String> {
+    if value.is_finite() && value >= 0.0 {
+        Some(value.to_string())
+    } else {
+        None
+    }
+}
+
+fn quote_token_in_amount_usd(quote: &Quote) -> Option<String> {
+    if is_trusted_usd_stablecoin(&quote.from_token) {
+        return finite_non_negative_amount(quote.from_amount_display);
+    }
+    if is_trusted_usd_stablecoin(&quote.to_token) {
+        return finite_non_negative_amount(quote.to_amount_display);
+    }
+    None
 }
 
 fn approval_amount_usd_from_quote(
@@ -984,20 +1045,51 @@ fn approval_amount_usd_from_quote(
     {
         return None;
     }
-    let price_per_from = quote
-        .raw_dodo_response
-        .get("resPricePerFromToken")
-        .and_then(|value| value.as_f64())?;
-    if price_per_from <= 0.0 || !price_per_from.is_finite() {
-        return None;
-    }
     let amount = raw_amount_to_display(raw_amount, token.decimals)?
         .parse::<f64>()
         .ok()?;
     if amount < 0.0 || !amount.is_finite() {
         return None;
     }
+    if is_trusted_usd_stablecoin(token) {
+        return Some(amount.to_string());
+    }
+    if !is_trusted_usd_stablecoin(&quote.to_token) || quote.from_amount_display <= 0.0 {
+        return None;
+    }
+    let price_per_from = quote.to_amount_display / quote.from_amount_display;
+    if price_per_from <= 0.0 || !price_per_from.is_finite() {
+        return None;
+    }
     Some((amount * price_per_from).to_string())
+}
+
+fn quote_spender(quote: &Quote) -> Option<String> {
+    token_address_for_payload(&quote.from_token)
+        .and_then(|_| crate::config::chain_config(quote.chain_id))
+        .map(|chain| chain.contracts.dodo_approve.to_string())
+}
+
+fn dodo_raw_min_return_amount(quote: &Quote) -> Option<String> {
+    let value = quote.raw_dodo_response.get("minReturnAmount")?;
+    value
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| value.as_u64().map(|n| n.to_string()))
+}
+
+fn quote_min_output_amounts(quote: &Quote) -> Result<(String, Option<String>)> {
+    if dodo_raw_min_return_amount(quote).as_deref() == Some(quote.to_amount_min.as_str()) {
+        return Ok((
+            quote.to_amount_min.clone(),
+            raw_amount_to_display(&quote.to_amount_min, quote.to_token.decimals),
+        ));
+    }
+
+    Ok((
+        to_raw_amount(&quote.to_amount_min, quote.to_token.decimals)?,
+        Some(quote.to_amount_min.clone()),
+    ))
 }
 
 fn build_dry_run_execute_payload(
@@ -1019,8 +1111,7 @@ fn build_dry_run_execute_payload(
         .parse()
         .map_err(|_| ChainError::InvalidAddress(from_address.to_string()))?;
     let amount_in_raw = to_raw_amount(&quote.from_amount, quote.from_token.decimals)?;
-    let min_amount_raw = to_raw_amount(&quote.to_amount_min, quote.to_token.decimals)?;
-    let min_amount_display = Some(quote.to_amount_min.clone());
+    let (min_amount_raw, min_amount_display) = quote_min_output_amounts(quote)?;
 
     Ok((
         from_address.to_string(),
@@ -1061,7 +1152,7 @@ fn build_dry_run_execute_payload(
                 min_amount_raw: Some(min_amount_raw),
                 min_amount_display,
             }),
-            spender: None,
+            spender: quote_spender(quote),
             router: Some(quote.router_to.clone()),
             estimated_gas_usd: quote.estimated_gas_usd.map(|v| v.to_string()),
         },
@@ -2024,9 +2115,14 @@ mod tests {
     }
 
     fn erc20_token(chain_id: u64) -> TokenRef {
+        let address = match chain_id {
+            42161 => "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+            8453 => "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            _ => "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+        };
         TokenRef {
             symbol: "USDC".to_string(),
-            address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48".to_string(),
+            address: address.to_string(),
             decimals: 6,
             chain_id,
         }
@@ -2481,6 +2577,7 @@ mod tests {
             result.risk.router.as_deref(),
             Some(quote.router_to.as_str())
         );
+        assert_eq!(result.risk.spender.as_deref(), None);
         assert_eq!(
             result.risk.token_in.as_ref().unwrap().amount_usd.as_deref(),
             Some("3000")
@@ -2489,6 +2586,131 @@ mod tests {
         assert_eq!(token_out.amount_display.as_deref(), Some("3000"));
         assert_eq!(token_out.min_amount_raw.as_deref(), Some("2970000000"));
         assert_eq!(token_out.min_amount_display.as_deref(), Some("2970"));
+    }
+
+    #[tokio::test]
+    async fn execute_quote_dry_run_sets_spender_only_for_erc20_input() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.dry_run = true;
+        args.wallet = Some("0x2222222222222222222222222222222222222222".to_string());
+        let mut quote = sample_quote(42161);
+        quote.from_token = erc20_token(42161);
+
+        let result = execute_quote_with_deps(&deps, &args, &test_config(42161), &quote)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.risk.spender.as_deref(),
+            crate::config::chain_config(42161).map(|c| c.contracts.dodo_approve)
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_quote_dry_run_uses_stablecoin_input_as_budget_amount_usd() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.dry_run = true;
+        args.wallet = Some("0x2222222222222222222222222222222222222222".to_string());
+        let mut quote = sample_quote(42161);
+        quote.from_token = erc20_token(42161);
+        quote.to_token = native_token(42161);
+        quote.from_amount = "3".to_string();
+        quote.from_amount_display = 3.0;
+        quote.to_amount = "0.00168248408632968".to_string();
+        quote.to_amount_display = 0.00168248408632968;
+        quote.to_amount_min = "0.001679119161479651".to_string();
+        quote.raw_dodo_response = serde_json::json!({"resPricePerFromToken": 0.00056082802877656});
+
+        let result = execute_quote_with_deps(&deps, &args, &test_config(42161), &quote)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.risk.token_in.as_ref().unwrap().amount_usd.as_deref(),
+            Some("3")
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_quote_dry_run_omits_amount_usd_for_untrusted_stablecoin_symbol() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.dry_run = true;
+        args.wallet = Some("0x2222222222222222222222222222222222222222".to_string());
+        let mut quote = sample_quote(42161);
+        quote.from_token = TokenRef {
+            symbol: "USDC".to_string(),
+            address: "0x2222222222222222222222222222222222222222".to_string(),
+            decimals: 6,
+            chain_id: 42161,
+        };
+        quote.to_token = native_token(42161);
+        quote.from_amount = "3".to_string();
+        quote.from_amount_display = 3.0;
+        quote.to_amount_display = 0.00168248408632968;
+
+        let result = execute_quote_with_deps(&deps, &args, &test_config(42161), &quote)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.risk.token_in.as_ref().unwrap().amount_usd.as_deref(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_quote_dry_run_keeps_dodo_raw_min_return_without_double_scaling() {
+        let deps = MockExecuteDeps {
+            estimated_gas: Ok(21_000),
+            nonce: Ok(7),
+            send_tx_result: Ok((Address::ZERO, "0xtx".to_string())),
+            receipts: RefCell::new(vec![]),
+        };
+        let mut args = execute_args();
+        args.dry_run = true;
+        args.wallet = Some("0x2222222222222222222222222222222222222222".to_string());
+        let mut quote = sample_quote(42161);
+        quote.to_token = native_token(42161);
+        quote.to_amount_min = "1679119161479651".to_string();
+        quote.raw_dodo_response = serde_json::json!({
+            "minReturnAmount": "1679119161479651"
+        });
+
+        let result = execute_quote_with_deps(&deps, &args, &test_config(42161), &quote)
+            .await
+            .unwrap();
+
+        let token_out = result.risk.token_out.as_ref().unwrap();
+        assert_eq!(
+            token_out.min_amount_raw.as_deref(),
+            Some("1679119161479651")
+        );
+        assert_eq!(
+            token_out.min_amount_display.as_deref(),
+            Some("0.001679119161479651")
+        );
+        assert_eq!(
+            raw_amount_to_display("1679119161479651", 18).as_deref(),
+            Some("0.001679119161479651")
+        );
     }
 
     #[tokio::test]
@@ -2781,7 +3003,7 @@ mod tests {
 
         assert_eq!(
             approval_amount_usd_from_quote(Some(&quote), &token, &raw_amount).as_deref(),
-            Some("7.5")
+            Some("3")
         );
     }
 

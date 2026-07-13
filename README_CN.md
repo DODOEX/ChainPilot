@@ -272,8 +272,13 @@ JSON 模式下，swap / approve / revoke 的 dry-run 不会签名或广播交易
 响应会保留原有预览字段，并额外包含稳定的外部 signer payload：
 `source`、`operation`、`chain_id`、`caip2`、`from`、
 `transaction { to, value, data, chain_id }`、可选 `quote` 和 `risk` metadata。
-`operation` 取值为 `swap_execute`、`approve` 或 `revoke`。兑换执行优先使用
-`--wallet` 传入 dry-run 钱包；如果省略，会 fallback 到全局
+`operation` 取值为 `swap_execute`、`approve` 或 `revoke`。swap dry-run 中，
+`risk.spender` 只会在输入资产为 ERC-20 时写入，并指向该链
+配置的 DODOApprove 合约；原生资产输入没有 allowance spender。
+`risk.token_in.amount_usd` 只会在输入或输出 token 地址命中 ChainPilot 可信
+USD 稳定币地址表时写入，不依赖 token symbol。兑换最低收到 metadata 中，
+`min_amount_raw` 使用 token base units，`min_amount_display` 使用人类可读单位。
+兑换执行优先使用 `--wallet` 传入 dry-run 钱包；如果省略，会 fallback 到全局
 `--wallet-address/WALLET_ADDRESS` sender context。approve / revoke 使用全局
 `--wallet-address`。approve / revoke dry-run 会在 `transaction.data` 中返回
 ERC-20 `approve(address,uint256)` calldata。Privy 等外部 signer 系统仍需要在

@@ -396,6 +396,8 @@ impl DodoClient {
         let expires_at = now + Duration::from_secs(quote_ttl_secs);
         let route_summary = parse_route_summary(&data.route_info);
 
+        let target_decimals = data.target_decimals.unwrap_or(to_token.decimals);
+
         Ok(Quote {
             quote_id: Uuid::new_v4(),
             created_at: now,
@@ -406,14 +408,14 @@ impl DodoClient {
                     .target_symbol
                     .unwrap_or_else(|| to_token.symbol.clone()),
                 address: to_token.address.clone(),
-                decimals: data.target_decimals.unwrap_or(to_token.decimals),
+                decimals: target_decimals,
                 chain_id: req.chain_id,
             },
             from_amount: req.amount.clone(),
             from_amount_display: req.amount_display,
             to_amount: data.res_amount.to_string(),
             to_amount_display: data.res_amount,
-            to_amount_min: data.min_return_amount.clone(),
+            to_amount_min: raw_amount_to_display(&data.min_return_amount, target_decimals),
             price_impact_pct: data.price_impact,
             exchange_rate: if req.amount_display > 0.0 {
                 data.res_amount / req.amount_display
@@ -443,6 +445,30 @@ impl DodoClient {
 
 fn parse_optional_u64(value: Option<FlexibleU64>) -> Result<Option<u64>> {
     value.map(FlexibleU64::into_u64).transpose()
+}
+
+fn raw_amount_to_display(raw: &str, decimals: u8) -> String {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.starts_with('-') {
+        return raw.to_string();
+    }
+    let decimals = decimals as usize;
+    if decimals == 0 {
+        return raw.to_string();
+    }
+    let padded = if raw.len() <= decimals {
+        format!("{}{}", "0".repeat(decimals + 1 - raw.len()), raw)
+    } else {
+        raw.to_string()
+    };
+    let split = padded.len().saturating_sub(decimals);
+    let (whole, frac) = padded.split_at(split);
+    let frac = frac.trim_end_matches('0');
+    if frac.is_empty() {
+        whole.to_string()
+    } else {
+        format!("{whole}.{frac}")
+    }
 }
 
 fn parse_route_summary(route_info: &Option<DodoRouteInfo>) -> Vec<RouteHop> {
@@ -477,4 +503,18 @@ fn parse_route_summary(route_info: &Option<DodoRouteInfo>) -> Vec<RouteHop> {
     }
 
     hops
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn raw_amount_to_display_converts_dodo_min_return_once() {
+        assert_eq!(
+            raw_amount_to_display("1679119161479651", 18),
+            "0.001679119161479651"
+        );
+        assert_eq!(raw_amount_to_display("2970000000", 6), "2970");
+    }
 }
