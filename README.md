@@ -281,6 +281,13 @@ They include the legacy preview fields plus a stable external-signer payload:
 `source`, `operation`, `chain_id`, `caip2`, `from`,
 `transaction { to, value, data, chain_id }`, optional `quote`, and `risk`
 metadata. `operation` is one of `swap_execute`, `approve`, or `revoke`.
+For swap dry-runs, `risk.spender` is populated only for ERC-20 inputs and
+points to the chain's configured DODOApprove contract; native-token inputs do
+not have an allowance spender. `risk.token_in.amount_usd` is included only when
+the input or output token address matches ChainPilot's trusted USD-stablecoin
+registry; symbols alone are not trusted for budget metadata. Swap minimum-output
+metadata reports `min_amount_raw` in token base units and `min_amount_display`
+in human-readable units.
 For swaps, pass the dry-run wallet with `--wallet`; if omitted, execute dry-run
 falls back to the global `--wallet-address` / `WALLET_ADDRESS` sender context.
 For approve/revoke, pass the sender with the global `--wallet-address`.
