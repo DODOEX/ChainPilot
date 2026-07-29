@@ -117,14 +117,46 @@ fn lookup<'a>(entries: &'a [(String, String)], key: &str) -> Option<&'a str> {
         .map(|(_, v)| v.as_str())
 }
 
-/// All configured `rpc_url.<id>` rows from the config file, sorted by chain id.
-fn rpc_entries(env_path: &std::path::Path) -> Vec<ConfigEntry> {
-    let mut rows: Vec<(u64, String)> = read_config_file(env_path)
+/// The effective value for a simple key: env var wins over the config file.
+fn effective_simple_value(env_path: &std::path::Path, env_var: &str) -> Option<String> {
+    std::env::var(env_var)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .or_else(|| lookup(&read_config_file(env_path), env_var).map(str::to_string))
+}
+
+/// The effective per-chain RPC map: config-file entries as the base, with
+/// `RPC_URL_<chainId>` environment variables taking precedence (matching the
+/// runtime precedence the app itself resolves). Sorted by chain id.
+fn effective_rpc_overrides(env_path: &std::path::Path) -> std::collections::BTreeMap<u64, String> {
+    let mut map: std::collections::BTreeMap<u64, String> = read_config_file(env_path)
         .into_iter()
         .filter_map(|(k, v)| rpc_key_chain_id(&k).map(|id| (id, v)))
         .collect();
-    rows.sort_by_key(|(id, _)| *id);
-    rows.into_iter()
+    // Environment overrides the file (env wins at runtime).
+    for (k, v) in std::env::vars() {
+        if let Some(id) = rpc_key_chain_id(&k) {
+            if !v.trim().is_empty() {
+                map.insert(id, v);
+            }
+        }
+    }
+    map
+}
+
+/// The effective configured RPC URL for a single chain (env over file).
+fn effective_rpc_for(env_path: &std::path::Path, chain_id: u64) -> Option<String> {
+    let env_var = rpc_env_var(chain_id);
+    std::env::var(&env_var)
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| lookup(&read_config_file(env_path), &env_var).map(str::to_string))
+}
+
+/// All configured `rpc_url.<id>` rows (effective: env over file), sorted by chain id.
+fn rpc_entries(env_path: &std::path::Path) -> Vec<ConfigEntry> {
+    effective_rpc_overrides(env_path)
+        .into_iter()
         .map(|(id, url)| ConfigEntry {
             key: format!("rpc_url.{}", id),
             value: Some(url),
@@ -318,11 +350,9 @@ fn get(
 ) -> Result<ExitCode> {
     match resolve_key(&args.key)? {
         ResolvedKey::Simple(key, env_var, sensitive) => {
-            // Read from config file first, then fall back to env var.
-            let entries = read_config_file(env_path);
-            let raw_value = lookup(&entries, env_var)
-                .map(str::to_string)
-                .or_else(|| std::env::var(env_var).ok());
+            // Report the effective value: env var wins over the config file,
+            // matching the precedence the app resolves at runtime.
+            let raw_value = effective_simple_value(env_path, env_var);
 
             let display_value = if sensitive {
                 raw_value.map(|v| mask_value(&v))
@@ -348,14 +378,9 @@ fn get(
             let target = chain.or_else(|| config.chain_id_overridden.then_some(config.chain_id));
             match target {
                 Some(id) => {
-                    let env_var = rpc_env_var(id);
-                    let entries = read_config_file(env_path);
-                    let raw_value = lookup(&entries, &env_var)
-                        .map(str::to_string)
-                        .or_else(|| std::env::var(&env_var).ok());
                     let entry = ConfigEntry {
                         key: format!("rpc_url.{}", id),
-                        value: raw_value,
+                        value: effective_rpc_for(env_path, id),
                         masked: false,
                     };
                     Ok(crate::output::print_output::<ConfigEntry>(
@@ -381,13 +406,10 @@ fn list(
     output_mode: OutputMode,
     config: &AppConfig,
 ) -> Result<ExitCode> {
-    let entries = read_config_file(env_path);
     let mut result: Vec<ConfigEntry> = CONFIGURABLE_KEYS
         .iter()
         .map(|&(key, env_var, sensitive)| {
-            let raw_value = lookup(&entries, env_var)
-                .map(str::to_string)
-                .or_else(|| std::env::var(env_var).ok());
+            let raw_value = effective_simple_value(env_path, env_var);
 
             let display_value = if sensitive {
                 raw_value.map(|v| mask_value(&v))
@@ -643,7 +665,11 @@ mod tests {
             &cfg,
         )
         .unwrap();
-        assert!(rpc_entries(&path).is_empty());
+        // unset edits the file; assert the file (not the env-merged view, which
+        // other parallel tests may pollute) has no RPC entries left.
+        assert!(read_config_file(&path)
+            .iter()
+            .all(|(k, _)| rpc_key_chain_id(k).is_none()));
         std::env::remove_var("RPC_URL_700006");
         std::env::remove_var("RPC_URL_700007");
     }
@@ -660,9 +686,56 @@ mod tests {
             ],
         )
         .unwrap();
-        let rows = rpc_entries(&path);
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].key, "rpc_url.700008");
-        assert_eq!(rows[1].key, "rpc_url.700009");
+        // rpc_entries merges the environment, so other RPC_URL_* vars may exist;
+        // assert the two file ids appear in ascending relative order.
+        let keys: Vec<String> = rpc_entries(&path).into_iter().map(|e| e.key).collect();
+        let a = keys.iter().position(|k| k == "rpc_url.700008");
+        let b = keys.iter().position(|k| k == "rpc_url.700009");
+        assert!(a.is_some() && b.is_some(), "both file ids present");
+        assert!(a < b, "sorted by chain id");
+    }
+
+    #[test]
+    fn inspection_reports_env_over_file() {
+        let (_d, path) = tmp_path();
+        write_config_file(&path, &[("RPC_URL_700010".to_string(), "https://from-file".to_string())])
+            .unwrap();
+        std::env::set_var("RPC_URL_700010", "https://from-env");
+
+        // Single-chain get and the full map both prefer the env value.
+        assert_eq!(
+            effective_rpc_for(&path, 700010).as_deref(),
+            Some("https://from-env")
+        );
+        let map = effective_rpc_overrides(&path);
+        assert_eq!(map.get(&700010).map(String::as_str), Some("https://from-env"));
+
+        std::env::remove_var("RPC_URL_700010");
+    }
+
+    #[test]
+    fn inspection_includes_env_only_override() {
+        let (_d, path) = tmp_path();
+        // Nothing in the file; the override exists only in the environment.
+        std::env::set_var("RPC_URL_700011", "https://env-only");
+
+        assert!(rpc_entries(&path).iter().any(|e| e.key == "rpc_url.700011"
+            && e.value.as_deref() == Some("https://env-only")));
+
+        std::env::remove_var("RPC_URL_700011");
+    }
+
+    #[test]
+    fn effective_simple_value_prefers_env_over_file() {
+        // Use a unique, non-config env var name so this cannot race with other
+        // tests that read real config keys via AppConfig::load().
+        const KEY: &str = "CHAINPILOT_TEST_SIMPLE_KEY_700100";
+        let (_d, path) = tmp_path();
+        write_config_file(&path, &[(KEY.to_string(), "file-key".to_string())]).unwrap();
+        std::env::set_var(KEY, "env-key");
+        assert_eq!(effective_simple_value(&path, KEY).as_deref(), Some("env-key"));
+        std::env::remove_var(KEY);
+        // With no env var, falls back to the file.
+        assert_eq!(effective_simple_value(&path, KEY).as_deref(), Some("file-key"));
     }
 }
