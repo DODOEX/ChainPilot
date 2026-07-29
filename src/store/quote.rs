@@ -194,6 +194,7 @@ mod tests {
         let config = AppConfig {
             rpc_url: "https://test.example.com".to_string(),
             rpc_url_overridden: false,
+            rpc_overrides: std::collections::HashMap::new(),
             chain_id: 1,
             chain_id_overridden: false,
             private_key: None,

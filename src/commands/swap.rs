@@ -2080,6 +2080,7 @@ mod tests {
         AppConfig {
             rpc_url: "https://rpc.example.com".to_string(),
             rpc_url_overridden: false,
+            rpc_overrides: std::collections::HashMap::new(),
             chain_id,
             chain_id_overridden: false,
             private_key: None,
@@ -3043,6 +3044,7 @@ mod tests {
         let signer = crate::chain::resolve_signer(&AppConfig {
             rpc_url: String::new(),
             rpc_url_overridden: false,
+            rpc_overrides: std::collections::HashMap::new(),
             chain_id: 1,
             chain_id_overridden: false,
             private_key: Some(private_key.to_string()),

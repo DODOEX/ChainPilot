@@ -1518,6 +1518,7 @@ mod tests {
         AppConfig {
             rpc_url: "https://ethereum-rpc.publicnode.com".to_string(),
             rpc_url_overridden: false,
+            rpc_overrides: std::collections::HashMap::new(),
             chain_id: 1,
             chain_id_overridden: false,
             private_key: None,
