@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::error::Result;
@@ -43,6 +44,10 @@ pub const DEFAULT_QUOTE_TTL_SECS: u64 = 1080;
 pub struct AppConfig {
     pub rpc_url: String,
     pub rpc_url_overridden: bool,
+    /// Per-chain RPC overrides configured via `RPC_URL_<chainId>` env vars
+    /// (persisted in `config.env`). Lower precedence than the `--rpc-url` flag,
+    /// higher than the chain's built-in default RPC.
+    pub rpc_overrides: HashMap<u64, String>,
     pub chain_id: u64,
     pub chain_id_overridden: bool,
     pub private_key: Option<String>,
@@ -69,6 +74,32 @@ pub struct AppConfig {
     pub data_dir: PathBuf,
 }
 
+/// Prefix for per-chain RPC override env vars, e.g. `RPC_URL_56`.
+pub const RPC_URL_ENV_PREFIX: &str = "RPC_URL_";
+
+/// The chain's built-in default RPC, or the global fallback for unknown chains.
+fn chain_default_rpc(chain_id: u64) -> &'static str {
+    chains::chain_config(chain_id)
+        .and_then(|c| c.rpc_urls.first().copied())
+        .unwrap_or(FALLBACK_RPC_URL)
+}
+
+/// Scan the environment for `RPC_URL_<chainId>` entries and build a chain_id → url map.
+/// Keys whose suffix is not a valid `u64` (e.g. a bare `RPC_URL`) are skipped.
+fn collect_rpc_overrides() -> HashMap<u64, String> {
+    std::env::vars()
+        .filter_map(|(key, value)| {
+            let suffix = key.strip_prefix(RPC_URL_ENV_PREFIX)?;
+            let chain_id: u64 = suffix.parse().ok()?;
+            let value = value.trim();
+            if value.is_empty() {
+                return None;
+            }
+            Some((chain_id, value.to_string()))
+        })
+        .collect()
+}
+
 impl AppConfig {
     pub fn load() -> Result<Self> {
         let chain_id_raw = std::env::var("CHAIN_ID").ok();
@@ -82,13 +113,17 @@ impl AppConfig {
             .as_deref()
             .is_some_and(|s| s.parse::<u64>().is_ok());
 
+        // Collect per-chain RPC overrides from `RPC_URL_<chainId>` env vars.
+        // These come from `config.env` (loaded into the environment at startup) or
+        // a real env var. `RPC_URL` without a numeric suffix is intentionally ignored:
+        // there is no single "all chains" RPC — that role belongs to the `--rpc-url` flag.
+        let rpc_overrides = collect_rpc_overrides();
+
         let rpc_url_overridden = false;
-        let rpc_url = {
-            chains::chain_config(chain_id)
-                .and_then(|c| c.rpc_urls.first().copied())
-                .unwrap_or(FALLBACK_RPC_URL)
-                .to_string()
-        };
+        let rpc_url = rpc_overrides
+            .get(&chain_id)
+            .cloned()
+            .unwrap_or_else(|| chain_default_rpc(chain_id).to_string());
 
         let private_key = std::env::var("PRIVATE_KEY").ok();
         let keystore_path = std::env::var("KEYSTORE_PATH").ok();
@@ -135,6 +170,7 @@ impl AppConfig {
             rpc_url_overridden,
             chain_id,
             chain_id_overridden,
+            rpc_overrides,
             private_key,
             keystore_path,
             keystore_password_file,
@@ -170,12 +206,21 @@ impl AppConfig {
     }
 
     /// Resolve the RPC URL for a target chain.
-    /// Precedence: explicit CLI/env override > chain default RPC > configured fallback RPC.
+    /// Precedence: `--rpc-url` flag > configured `RPC_URL_<chainId>` > chain default RPC
+    /// > current `rpc_url` fallback.
     pub fn rpc_url_for_chain(&self, chain_id: u64) -> String {
-        if self.rpc_url_overridden || chain_id == self.chain_id {
+        // The `--rpc-url` flag wins for every chain.
+        if self.rpc_url_overridden {
             return self.rpc_url.clone();
         }
-
+        // The active chain's `rpc_url` was already resolved (override-or-default) in `load`.
+        if chain_id == self.chain_id {
+            return self.rpc_url.clone();
+        }
+        // Per-chain configured override, then the chain's built-in default.
+        if let Some(url) = self.rpc_overrides.get(&chain_id) {
+            return url.clone();
+        }
         chains::chain_config(chain_id)
             .and_then(|c| c.rpc_urls.first().copied())
             .unwrap_or(self.rpc_url.as_str())
@@ -410,6 +455,96 @@ mod tests {
             assert_eq!(cfg.chain_id, 11155111);
             assert_eq!(cfg.rpc_url, "https://override.example.com");
         });
+    }
+
+    #[test]
+    fn configured_rpc_override_sets_active_chain_rpc() {
+        with_env(
+            &[
+                ("CHAIN_ID", Some("1")),
+                ("RPC_URL_1", Some("https://my-eth-node.example")),
+            ],
+            || {
+                let cfg = AppConfig::load().unwrap();
+                assert_eq!(cfg.rpc_url, "https://my-eth-node.example");
+                assert!(!cfg.rpc_url_overridden);
+                assert_eq!(
+                    cfg.rpc_overrides.get(&1).map(String::as_str),
+                    Some("https://my-eth-node.example")
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn configured_rpc_override_used_for_non_active_chain() {
+        with_env(
+            &[
+                ("CHAIN_ID", Some("1")),
+                ("RPC_URL_56", Some("https://my-bsc-node.example")),
+                ("RPC_URL_1", None),
+            ],
+            || {
+                let cfg = AppConfig::load().unwrap();
+                // Active chain keeps its built-in default...
+                assert!(cfg.rpc_url.starts_with("https://"));
+                assert_ne!(cfg.rpc_url, "https://my-bsc-node.example");
+                // ...while chain 56 resolves to the configured override.
+                assert_eq!(cfg.rpc_url_for_chain(56), "https://my-bsc-node.example");
+            },
+        );
+    }
+
+    #[test]
+    fn explicit_rpc_flag_beats_configured_override() {
+        with_env(
+            &[
+                ("CHAIN_ID", Some("1")),
+                ("RPC_URL_56", Some("https://my-bsc-node.example")),
+            ],
+            || {
+                let mut cfg = AppConfig::load().unwrap();
+                cfg.rpc_url = "https://flag-override.example".to_string();
+                cfg.rpc_url_overridden = true;
+                // The flag wins for every chain, including one with a configured override.
+                assert_eq!(cfg.rpc_url_for_chain(56), "https://flag-override.example");
+            },
+        );
+    }
+
+    #[test]
+    fn configured_rpc_override_resolves_unknown_chain() {
+        with_env(
+            &[
+                ("CHAIN_ID", Some("1")),
+                ("RPC_URL_999999", Some("https://custom-unknown.example")),
+            ],
+            || {
+                let cfg = AppConfig::load().unwrap();
+                assert_eq!(
+                    cfg.rpc_url_for_chain(999999),
+                    "https://custom-unknown.example"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn bare_rpc_url_env_is_ignored_as_override() {
+        with_env(
+            &[
+                ("CHAIN_ID", Some("1")),
+                ("RPC_URL_1", None),
+                ("RPC_URL", Some("https://should-be-ignored.example")),
+            ],
+            || {
+                let cfg = AppConfig::load().unwrap();
+                // No numeric suffix means no per-chain override; falls back to chain default.
+                assert!(cfg.rpc_overrides.get(&1).is_none());
+                assert!(cfg.rpc_url.starts_with("https://"));
+                assert_ne!(cfg.rpc_url, "https://should-be-ignored.example");
+            },
+        );
     }
 
     #[test]

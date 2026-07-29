@@ -101,7 +101,8 @@ chainpilot [GLOBAL_FLAGS] <COMMAND> [SUBcommand_FLAGS]
 | `--password-file <path>` | `KEYSTORE_PASSWORD_FILE` | — | Read keystore password from file |
 | `--password-env <NAME>` | `KEYSTORE_PASSWORD_ENV` | — | Read keystore password from the named env var |
 | `--wallet-address <addr>` | `WALLET_ADDRESS` | — | Read-only wallet context and dry-run sender fallback |
-| `--rpc-url <url>` | — | Chain's public RPC | Explicit JSON-RPC override |
+| `--rpc-url <url>` | — | Chain's public RPC | Explicit JSON-RPC override (all chains) |
+| `config set rpc_url` | `RPC_URL_<chainId>` | Chain's public RPC | Persisted per-chain RPC override |
 | `--chain-id <id>` | `CHAIN_ID` | `1` | Global chain context |
 
 **Context propagation**: Once the user specifies a `--wallet-address` or `--chain-id`,
@@ -119,7 +120,7 @@ the user explicitly asks for a different one.
 
 Runtime env vars are intentionally limited to `PRIVATE_KEY`, `KEYSTORE_PATH`,
 `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`,
-`WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`,
+`WALLET_ADDRESS`, `CHAIN_ID`, `RPC_URL_<chainId>`, `DODO_API_KEY`, `DODO_PROJECT_ID`,
 `DODO_API_URL`, `COINGECKO_API_URL`, `COINGECKO_API_KEY`,
 `DEXSCREENER_API_URL`, `DEBANK_API_KEY`, `DEBANK_API_URL`,
 `ZERION_API_KEY`, `ZERION_API_URL`, `GOLDRUSH_API_KEY`,
@@ -1018,7 +1019,8 @@ confirm with the user before using any candidate address in a swap or approval.
 | Plume | 98866 |
 | Sepolia Testnet | 11155111 |
 
-For unsupported chain IDs, pass `--rpc-url` manually.
+For unsupported chain IDs, pass `--rpc-url` manually, or persist a per-chain RPC
+with `chainpilot config set rpc_url` (see the `config` subcommands below).
 
 **Non-EVM analytics**: `chain` subcommands (and `protocol info/tvl/revenue/chains`)
 additionally accept `solana` / `svm` and `bitcoin` / `bvm` — read-only via
@@ -1043,6 +1045,19 @@ Save an API key or configuration value. The value is written to the persistent c
 and immediately available to the current process. On Unix, the config file is
 written with owner-only permissions (`0600`).
 
+**Per-chain RPC endpoints** use the special `rpc_url` key, stored as
+`RPC_URL_<chainId>`. Precedence is `--rpc-url` flag > configured
+`RPC_URL_<chainId>` > chain default RPC.
+
+```bash
+# Active chain (--chain-id, default 1); or name the chain in the key
+chainpilot --chain-id 56 config set rpc_url https://my-bsc-node
+chainpilot config set rpc_url.56 https://my-bsc-node
+
+# Batch several chains with a JSON map (merges; unlisted chains untouched)
+chainpilot config set rpc_url '{"1":"https://my-eth-node","56":"https://my-bsc-node"}'
+```
+
 ### `config get`
 
 ```bash
@@ -1050,6 +1065,9 @@ chainpilot config get <KEY>
 ```
 
 Show the current value of a configuration key. Sensitive values are partially masked.
+For RPC endpoints, `config get rpc_url` lists every configured chain, while
+`config get rpc_url.56` shows one chain. Bare `rpc_url` always covers all chains
+regardless of `--chain-id` / `CHAIN_ID`.
 
 ### `config list`
 
@@ -1065,7 +1083,10 @@ Show all configurable keys with their current values (sensitive values masked).
 chainpilot config unset <KEY>
 ```
 
-Remove a configuration key from the config file.
+Remove a configuration key from the config file. For RPC endpoints,
+`config unset rpc_url.56` removes one chain, while a bare `config unset rpc_url`
+always clears every configured chain — it ignores `--chain-id` / `CHAIN_ID`, so
+it never silently removes just one.
 
 ### Configurable Keys
 
@@ -1078,6 +1099,7 @@ Remove a configuration key from the config file.
 | `zerion_api_key` | `ZERION_API_KEY` | Yes | Zerion API key — second-tier wallet aggregator |
 | `goldrush_api_key` | `GOLDRUSH_API_KEY` | Yes | Goldrush / Covalent API key — third-tier wallet aggregator |
 | `dune_api_key` | `DUNE_API_KEY` | Yes | Dune Analytics API key — wallet labels fallback |
+| `rpc_url[.<chainId>]` | `RPC_URL_<chainId>` | No | Per-chain RPC endpoint; accepts a single URL or a `{chainId: url}` JSON map |
 
 Only these keys are supported by `chainpilot config` today. Other runtime
 settings, such as `COINGECKO_API_URL`, `DEXSCREENER_API_URL`,

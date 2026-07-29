@@ -63,7 +63,7 @@ DODO_PROJECT_ID=your-id
 
 ## 配置
 
-环境变量刻意收敛为少数几个。运行时只读取 `PRIVATE_KEY`、`KEYSTORE_PATH`、`KEYSTORE_PASSWORD_FILE`、`KEYSTORE_PASSWORD_ENV`、`KEYSTORE_PASSWORD`、`WALLET_ADDRESS`、`CHAIN_ID`、`DODO_API_KEY`、`DODO_PROJECT_ID`、`DODO_API_URL`、`COINGECKO_API_KEY`、`COINGECKO_API_URL`、`DEXSCREENER_API_URL`、`DEBANK_API_KEY`、`DEBANK_API_URL`、`ZERION_API_KEY`、`ZERION_API_URL`、`GOLDRUSH_API_KEY`、`GOLDRUSH_API_URL`；有对应 CLI 标志的情况下，CLI 仍然优先。
+环境变量刻意收敛为少数几个。运行时只读取 `PRIVATE_KEY`、`KEYSTORE_PATH`、`KEYSTORE_PASSWORD_FILE`、`KEYSTORE_PASSWORD_ENV`、`KEYSTORE_PASSWORD`、`WALLET_ADDRESS`、`CHAIN_ID`、`RPC_URL_<chainId>`、`DODO_API_KEY`、`DODO_PROJECT_ID`、`DODO_API_URL`、`COINGECKO_API_KEY`、`COINGECKO_API_URL`、`DEXSCREENER_API_URL`、`DEBANK_API_KEY`、`DEBANK_API_URL`、`ZERION_API_KEY`、`ZERION_API_URL`、`GOLDRUSH_API_KEY`、`GOLDRUSH_API_URL`；有对应 CLI 标志的情况下，CLI 仍然优先。
 
 | 变量名                 | CLI 标志              | 默认值                       | 说明                               |
 |------------------------|-----------------------|------------------------------|------------------------------------|
@@ -73,7 +73,8 @@ DODO_PROJECT_ID=your-id
 | `KEYSTORE_PASSWORD_ENV` | `--password-env`     | —                            | 从指定环境变量读取 keystore 密码   |
 | `KEYSTORE_PASSWORD`    | —                     | —                            | keystore 密码的默认环境变量        |
 | `WALLET_ADDRESS`       | `--wallet-address`    | —                            | 余额查询 / 模拟 / dry-run sender fallback 钱包地址 |
-| `--rpc-url`            | 仅 CLI                | 链内置公共 RPC               | 显式覆盖 JSON-RPC 端点             |
+| `--rpc-url`            | 仅 CLI                | 链内置公共 RPC               | 显式覆盖 JSON-RPC 端点（所有链）   |
+| `RPC_URL_<chainId>`    | `config set rpc_url`  | 链内置公共 RPC               | 持久化的按链 RPC 覆盖              |
 | `CHAIN_ID`             | `--chain-id`          | `1`（以太坊主网）            | 当前链 ID                          |
 | `DODO_API_KEY`         | —                     | 编译时内嵌默认值             | DODO 路由 API Key                  |
 | `DODO_PROJECT_ID`      | —                     | 编译时内嵌默认值             | DODO 项目 ID，用于代币列表查询     |
@@ -138,7 +139,34 @@ RUST_LOG=debug chainpilot ...
 | Plume               | 98866      |
 | Sepolia Testnet     | 11155111   |
 
-不在列表中的链，请手动传入 `--rpc-url`。
+不在列表中的链，请手动传入 `--rpc-url`，或用 `chainpilot config set rpc_url`
+持久化一个按链的 RPC（见下方[自定义 RPC 端点](#自定义-rpc-端点)）。
+
+### 自定义 RPC 端点
+
+每条链默认使用内置的公共 RPC。如需指向你自己的节点，可持久化一个按链的覆盖
+（以 `RPC_URL_<chainId>` 存储在配置文件中）。优先级为 **`--rpc-url` 标志 >
+已配置的 `RPC_URL_<chainId>` > 链默认值**；`--rpc-url` 标志仍会对所有链生效、
+优先级最高。
+
+```bash
+# 设置某条链的 RPC（不带后缀的 `rpc_url` 作用于当前 --chain-id）
+chainpilot --chain-id 56 config set rpc_url https://my-bsc-node
+chainpilot config set rpc_url.56 https://my-bsc-node        # 等价写法
+
+# 用 JSON map 一次配置多条链（合并写入，保留其他链）
+chainpilot config set rpc_url '{"1":"https://my-eth-node","56":"https://my-bsc-node"}'
+
+# 查看 / 删除
+chainpilot config get rpc_url            # 所有已配置的链
+chainpilot config get rpc_url.56         # 单条链
+chainpilot config unset rpc_url.56       # 单条链
+chainpilot config unset rpc_url          # 全部
+```
+
+注意：`set` 不带 `.<chainId>` 后缀时作用于当前链（`--chain-id`，默认 1）；但
+`get`/`unset rpc_url` 不带后缀时**始终**作用于**所有**已配置的链，与
+`--chain-id` / `CHAIN_ID` 无关；如需针对单条链,请使用 `rpc_url.<chainId>` 形式。
 
 ## 非 EVM 支持（Solana / 比特币）
 

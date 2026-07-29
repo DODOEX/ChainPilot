@@ -69,7 +69,7 @@ DODO_PROJECT_ID=your-id
 
 ## Configuration
 
-Supported environment variables are intentionally limited. Runtime config is read only from `PRIVATE_KEY`, `KEYSTORE_PATH`, `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`, `WALLET_ADDRESS`, `CHAIN_ID`, `DODO_API_KEY`, `DODO_PROJECT_ID`, `DODO_API_URL`, `COINGECKO_API_KEY`, `COINGECKO_API_URL`, `DEXSCREENER_API_URL`, `DEBANK_API_KEY`, `DEBANK_API_URL`, `ZERION_API_KEY`, `ZERION_API_URL`, `GOLDRUSH_API_KEY`, and `GOLDRUSH_API_URL`. CLI flags still override where available.
+Supported environment variables are intentionally limited. Runtime config is read only from `PRIVATE_KEY`, `KEYSTORE_PATH`, `KEYSTORE_PASSWORD_FILE`, `KEYSTORE_PASSWORD_ENV`, `KEYSTORE_PASSWORD`, `WALLET_ADDRESS`, `CHAIN_ID`, `RPC_URL_<chainId>`, `DODO_API_KEY`, `DODO_PROJECT_ID`, `DODO_API_URL`, `COINGECKO_API_KEY`, `COINGECKO_API_URL`, `DEXSCREENER_API_URL`, `DEBANK_API_KEY`, `DEBANK_API_URL`, `ZERION_API_KEY`, `ZERION_API_URL`, `GOLDRUSH_API_KEY`, and `GOLDRUSH_API_URL`. CLI flags still override where available.
 
 | Variable               | CLI flag              | Default                        | Description                                    |
 |------------------------|-----------------------|--------------------------------|------------------------------------------------|
@@ -79,7 +79,8 @@ Supported environment variables are intentionally limited. Runtime config is rea
 | `KEYSTORE_PASSWORD_ENV` | `--password-env`     | —                              | Read keystore password from named env var      |
 | `KEYSTORE_PASSWORD`    | —                     | —                              | Default env var used for keystore password     |
 | `WALLET_ADDRESS`       | `--wallet-address`    | —                              | Wallet address for balance/simulate and dry-run sender fallback |
-| `--rpc-url`            | CLI only              | Chain's built-in public RPC    | Explicit JSON-RPC override                     |
+| `--rpc-url`            | CLI only              | Chain's built-in public RPC    | Explicit JSON-RPC override (all chains)        |
+| `RPC_URL_<chainId>`    | `config set rpc_url`  | Chain's built-in public RPC    | Persisted per-chain RPC override               |
 | `CHAIN_ID`             | `--chain-id`          | `1` (Ethereum mainnet)         | Active chain ID                                |
 | `DODO_API_KEY`         | —                     | Compiled-in default            | DODO routing API key                           |
 | `DODO_PROJECT_ID`      | —                     | Compiled-in default            | DODO project ID for token list lookup          |
@@ -144,7 +145,35 @@ Custom token behavior:
 | Plume              | 98866      |
 | Sepolia Testnet    | 11155111   |
 
-For unsupported chain IDs, pass `--rpc-url` manually.
+For unsupported chain IDs, pass `--rpc-url` manually, or persist a per-chain RPC
+with `chainpilot config set rpc_url` (see [Custom RPC endpoints](#custom-rpc-endpoints)).
+
+### Custom RPC endpoints
+
+Each chain uses a built-in public RPC by default. To point a chain at your own
+node, persist a per-chain override (stored as `RPC_URL_<chainId>` in the config
+file). Precedence is **`--rpc-url` flag > configured `RPC_URL_<chainId>` > chain
+default**; the `--rpc-url` flag still overrides everything for all chains.
+
+```bash
+# Set the RPC for one chain (bare `rpc_url` targets the active --chain-id)
+chainpilot --chain-id 56 config set rpc_url https://my-bsc-node
+chainpilot config set rpc_url.56 https://my-bsc-node        # equivalent
+
+# Set several chains at once with a JSON map (merges, keeping other chains)
+chainpilot config set rpc_url '{"1":"https://my-eth-node","56":"https://my-bsc-node"}'
+
+# Inspect / remove
+chainpilot config get rpc_url            # all configured chains
+chainpilot config get rpc_url.56         # one chain
+chainpilot config unset rpc_url.56       # one chain
+chainpilot config unset rpc_url          # all chains
+```
+
+Note: `set` without a `.<chainId>` suffix targets the active chain
+(`--chain-id`, default 1). Bare `get`/`unset rpc_url`, however, always operate on
+**all** configured chains regardless of `--chain-id` / `CHAIN_ID`; use the
+`rpc_url.<chainId>` form to target a single chain.
 
 ## Non-EVM Support (Solana / Bitcoin)
 

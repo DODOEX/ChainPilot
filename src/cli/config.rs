@@ -21,14 +21,18 @@ pub enum ConfigAction {
 
 #[derive(Args)]
 pub struct ConfigSetArgs {
-    /// Configuration key name
+    /// Configuration key: an API key name, or `rpc_url[.<chainId>]` for a
+    /// per-chain RPC endpoint (bare `rpc_url` targets the active `--chain-id`).
     pub key: String,
-    /// Value to set
+    /// Value to set. For `rpc_url`, a single URL, or a JSON map of
+    /// chainId -> URL to configure several chains at once
+    /// (e.g. '{"1":"https://eth","56":"https://bsc"}').
     pub value: String,
 }
 
 #[derive(Args)]
 pub struct ConfigKeyArg {
-    /// Configuration key name
+    /// Configuration key: an API key name, or `rpc_url[.<chainId>]`. Bare
+    /// `rpc_url` always targets all chains; use `rpc_url.<chainId>` for one.
     pub key: String,
 }

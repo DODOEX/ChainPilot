@@ -4,9 +4,8 @@ pub static CONFIG: ChainConfig = ChainConfig {
     chain_id: 137,
     name: "Polygon",
     rpc_urls: &[
-        "https://polygon-rpc.com",
-        "https://rpc-mainnet.maticvigil.com",
-        "https://rpc.ankr.com/polygon",
+        "https://polygon-bor-rpc.publicnode.com",
+        "https://1rpc.io/matic",
     ],
     contracts: ChainContracts {
         dodo_approve: "0x6D310348d5c12009854DFCf72e0DF9027e8cb4f4",
