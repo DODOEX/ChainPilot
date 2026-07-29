@@ -170,6 +170,11 @@ chainpilot config unset rpc_url.56       # one chain
 chainpilot config unset rpc_url          # all chains
 ```
 
+Note: `set` without a `.<chainId>` suffix targets the active chain
+(`--chain-id`, default 1). Bare `get`/`unset rpc_url`, however, always operate on
+**all** configured chains regardless of `--chain-id` / `CHAIN_ID`; use the
+`rpc_url.<chainId>` form to target a single chain.
+
 ## Non-EVM Support (Solana / Bitcoin)
 
 ChainPilot's **read-only** commands also work on Solana (SVM) and Bitcoin

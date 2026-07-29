@@ -1066,7 +1066,8 @@ chainpilot config get <KEY>
 
 Show the current value of a configuration key. Sensitive values are partially masked.
 For RPC endpoints, `config get rpc_url` lists every configured chain, while
-`config get rpc_url.56` (or `--chain-id 56 config get rpc_url`) shows one chain.
+`config get rpc_url.56` shows one chain. Bare `rpc_url` always covers all chains
+regardless of `--chain-id` / `CHAIN_ID`.
 
 ### `config list`
 
@@ -1084,7 +1085,8 @@ chainpilot config unset <KEY>
 
 Remove a configuration key from the config file. For RPC endpoints,
 `config unset rpc_url.56` removes one chain, while a bare `config unset rpc_url`
-clears every configured chain (or the active `--chain-id` if one is set).
+always clears every configured chain — it ignores `--chain-id` / `CHAIN_ID`, so
+it never silently removes just one.
 
 ### Configurable Keys
 

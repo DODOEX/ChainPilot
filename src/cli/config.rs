@@ -33,6 +33,6 @@ pub struct ConfigSetArgs {
 #[derive(Args)]
 pub struct ConfigKeyArg {
     /// Configuration key: an API key name, or `rpc_url[.<chainId>]`. Bare
-    /// `rpc_url` targets all chains (or the active `--chain-id` if set).
+    /// `rpc_url` always targets all chains; use `rpc_url.<chainId>` for one.
     pub key: String,
 }

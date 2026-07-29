@@ -373,9 +373,10 @@ fn get(
             ))
         }
         ResolvedKey::Rpc { chain } => {
-            // Explicit chain = a `.` suffix on the key, or an explicit `--chain-id`.
-            // Otherwise show the whole configured map.
-            let target = chain.or_else(|| config.chain_id_overridden.then_some(config.chain_id));
+            // A `.` suffix targets one chain; bare `rpc_url` always shows the whole
+            // map. Scope deliberately ignores the active chain id (including an
+            // ambient CHAIN_ID) so bare get/unset behavior is predictable.
+            let target = chain;
             match target {
                 Some(id) => {
                     let entry = ConfigEntry {
@@ -470,8 +471,10 @@ fn unset(
             ))
         }
         ResolvedKey::Rpc { chain } => {
-            // Explicit chain removes that one; otherwise clear every configured RPC.
-            let target = chain.or_else(|| config.chain_id_overridden.then_some(config.chain_id));
+            // A `.` suffix removes one chain; bare `rpc_url` always clears every
+            // configured RPC. Scope deliberately ignores the active chain id
+            // (including an ambient CHAIN_ID) so this destructive op is predictable.
+            let target = chain;
             let mut entries = read_config_file(env_path);
 
             match target {
@@ -672,6 +675,30 @@ mod tests {
             .all(|(k, _)| rpc_key_chain_id(k).is_none()));
         std::env::remove_var("RPC_URL_700006");
         std::env::remove_var("RPC_URL_700007");
+    }
+
+    #[test]
+    fn bare_unset_clears_all_even_when_active_chain_is_set() {
+        let (_d, path) = tmp_path();
+        // chain_id_overridden = true (as if CHAIN_ID / --chain-id 700012 is set).
+        let cfg = test_cfg(700012, true);
+        set_rpc(Some(700012), "https://a", &path, OutputMode::Quiet, &cfg).unwrap();
+        set_rpc(Some(700013), "https://b", &path, OutputMode::Quiet, &cfg).unwrap();
+        unset(
+            ConfigKeyArg {
+                key: "rpc_url".to_string(),
+            },
+            &path,
+            OutputMode::Quiet,
+            &cfg,
+        )
+        .unwrap();
+        // Bare unset must clear BOTH, not just the active chain 700012.
+        assert!(read_config_file(&path)
+            .iter()
+            .all(|(k, _)| rpc_key_chain_id(k).is_none()));
+        std::env::remove_var("RPC_URL_700012");
+        std::env::remove_var("RPC_URL_700013");
     }
 
     #[test]

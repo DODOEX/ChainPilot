@@ -164,6 +164,10 @@ chainpilot config unset rpc_url.56       # 单条链
 chainpilot config unset rpc_url          # 全部
 ```
 
+注意：`set` 不带 `.<chainId>` 后缀时作用于当前链（`--chain-id`，默认 1）；但
+`get`/`unset rpc_url` 不带后缀时**始终**作用于**所有**已配置的链，与
+`--chain-id` / `CHAIN_ID` 无关；如需针对单条链,请使用 `rpc_url.<chainId>` 形式。
+
 ## 非 EVM 支持（Solana / 比特币）
 
 ChainPilot 的**只读**命令同样支持 Solana（SVM）和比特币主网（BVM）。路由按
